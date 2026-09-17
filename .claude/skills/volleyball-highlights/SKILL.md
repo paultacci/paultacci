@@ -80,9 +80,12 @@ python3 .claude/skills/volleyball-highlights/scripts/cut_reel.py \
 
 This finds the loudest audio moment in the ~20s before each score-change timestamp (the actual play), cuts a clip padded around it, merges clips that land close together, and stitches everything into `highlight_reel.mp4`. Individual clips remain in `clips/` for review before sharing anything.
 
+**If the source has no audio** (check `manifest.json`'s `has_audio` — it'll be `false`, and `rms.json` will be an empty list): there's no peak to anchor on, so `cut_reel.py` automatically falls back to a fixed window ending at the score-change timestamp instead — `[t - 12s, t + 3s]` by default, tunable with `--no-audio-window`. This still works end-to-end (verified against a real audio-free test video), it's just less precise: instead of centering on the exact moment of the kill, the clip covers "the last N seconds before the board updated," so it may start a bit early (dead time) or occasionally clip the very start of a long rally. If you know the venue's typical scoreboard lag from watching a few points, set `--no-audio-window` close to that plus a couple seconds of buffer; a smaller `--frame-interval` in Step 1 also helps here since the scoreboard becomes the *only* timing signal.
+
 Useful tuning flags if the defaults feel off after watching the output:
 - `--lookback` — widen if the board is very slow to update, narrow if unrelated plays are getting swept in.
 - `--pad-before` / `--pad-after` — how much runway around the peak moment.
+- `--no-audio-window` — only used when there's no audio peak to anchor on (see above).
 - `--max-clip` — hard ceiling per clip (prevents runaway clips when the peak-to-score-change gap is large).
 - `--merge-gap` — how close two events need to be to combine into one clip instead of two.
 
@@ -93,6 +96,6 @@ Tell the user where `highlight_reel.mp4` and the individual `clips/` ended up, a
 ## Known limitations (be upfront about these)
 
 - No commentary/captions means there's no semantic signal — this is loudness + scoreboard timing only, tuned by hand, not a highlight-quality model. It doesn't know a great defensive dig from a lucky net roll unless the crowd reacts.
-- If the venue is quiet (small crowd, no PA), the audio-peak step is less reliable; consider using ffmpeg motion/scene-change detection as an additional anchor if this becomes a problem often — not implemented yet.
+- If the venue is quiet (small crowd, no PA) or there's no audio at all (recording issue), the pipeline degrades gracefully to scoreboard-only timing (see Step 3) rather than failing, but loses the ability to pinpoint the exact moment of the play within the pre-score window; consider ffmpeg motion/scene-change detection as an additional anchor if this comes up often — not implemented yet.
 - If the total sampled frames don't divide evenly into the grid, the final contact sheet is padded with black cells rather than dropped — you'll see solid black where a cell has no frame. Don't try to read a score out of a black cell; it just means the match ended before that slot.
 - This is per-match manual-ish work (you read every contact sheet) — it trades subscription cost for your time reading images. If that trade stops being worth it for high volume, revisit with a real vision-based action-spotting model.

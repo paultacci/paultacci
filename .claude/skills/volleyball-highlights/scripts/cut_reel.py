@@ -60,14 +60,23 @@ def compute_clip_windows(
     max_clip: float,
     merge_gap: float,
     duration: float,
+    no_audio_window: float = 12.0,
 ) -> list[tuple[float, float]]:
+    """With audio: anchor each clip on the loudest moment shortly before the score
+    change (the actual play), then pad around it. Without audio (globally, or just
+    no data in a given event's lookback window -- e.g. near the start of the video),
+    there's no peak to anchor on, so fall back to a fixed window ending at the score
+    change: [t - no_audio_window, t + pad_after]. Less precise, but scoreboard-only."""
     raw: list[tuple[float, float]] = []
     for ev in events:
         t = float(ev["score_change_time"])
-        peak = find_peak(rms_points, max(0.0, t - lookback), t + 2.0)
-        anchor = peak if peak is not None else max(0.0, t - lookback / 2)
-        start = max(0.0, anchor - pad_before)
-        end = min(duration, max(anchor + pad_after, t + 1.0))
+        peak = find_peak(rms_points, max(0.0, t - lookback), t + 2.0) if rms_points else None
+        if peak is not None:
+            start = max(0.0, peak - pad_before)
+            end = min(duration, max(peak + pad_after, t + 1.0))
+        else:
+            start = max(0.0, t - no_audio_window)
+            end = min(duration, t + pad_after)
         if end - start > max_clip:
             start = end - max_clip
         raw.append((start, end))
@@ -134,6 +143,9 @@ def main() -> None:
     ap.add_argument("--max-clip", type=float, default=18.0, help="Hard cap on clip length (seconds)")
     ap.add_argument("--merge-gap", type=float, default=4.0,
                      help="Merge two candidate clips if closer together than this (seconds)")
+    ap.add_argument("--no-audio-window", type=float, default=12.0,
+                     help="Fixed seconds before a score change to include when there's no audio "
+                          "peak to anchor on (no audio track, or silence near that timestamp)")
     args = ap.parse_args()
 
     require("ffmpeg")
@@ -145,9 +157,13 @@ def main() -> None:
     if not events:
         sys.exit("error: no events provided -- nothing to cut")
 
+    if not rms_points:
+        print("note: no audio data -- clips will be timed from the scoreboard alone "
+              f"(fixed {args.no_audio_window:.0f}s window before each score change)")
+
     windows = compute_clip_windows(
         events, rms_points, args.lookback, args.pad_before, args.pad_after,
-        args.max_clip, args.merge_gap, args.duration,
+        args.max_clip, args.merge_gap, args.duration, args.no_audio_window,
     )
 
     outdir = Path(args.outdir).expanduser().resolve()

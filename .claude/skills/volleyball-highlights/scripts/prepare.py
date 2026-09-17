@@ -67,8 +67,26 @@ def acquire_source(source: str, workdir: Path) -> Path:
     return path
 
 
-def extract_audio_rms(video: Path, workdir: Path, window_seconds: float) -> Path:
-    """One ffmpeg pass: resample audio, chop into fixed windows, log RMS dB per window."""
+def has_audio_stream(video: Path) -> bool:
+    if shutil.which("ffprobe"):
+        result = run([
+            "ffprobe", "-v", "error", "-select_streams", "a",
+            "-show_entries", "stream=index", "-of", "csv=p=0", str(video),
+        ])
+        if result.returncode == 0:
+            return bool(result.stdout.strip())
+    result = run(["ffmpeg", "-i", str(video)])
+    return bool(re.search(r"Stream #\d+:\d+.*: Audio:", result.stderr))
+
+
+def extract_audio_rms(video: Path, workdir: Path, window_seconds: float) -> Path | None:
+    """One ffmpeg pass: resample audio, chop into fixed windows, log RMS dB per window.
+    Returns None (no error) if the source has no audio stream at all -- the caller
+    falls back to scoreboard-only timing in that case."""
+    if not has_audio_stream(video):
+        print("warning: source has no audio stream -- skipping audio analysis, "
+              "clips will be timed from the scoreboard alone (less precise)")
+        return None
     log_path = workdir / "rms.log"
     sample_rate = 22050
     n_samples = int(sample_rate * window_seconds)
@@ -156,7 +174,8 @@ def main() -> None:
     duration = ffprobe_duration(video)
 
     rms_log = extract_audio_rms(video, workdir, args.audio_window)
-    rms_points = parse_rms_log(rms_log)
+    rms_points = parse_rms_log(rms_log) if rms_log is not None else []
+    has_audio = rms_log is not None
     rms_json = workdir / "rms.json"
     rms_json.write_text(json.dumps(rms_points))
 
@@ -176,6 +195,7 @@ def main() -> None:
         "sheets_dir": str(sheets_dir),
         "rms_json": str(rms_json),
         "rms_window_seconds": args.audio_window,
+        "has_audio": has_audio,
         "note": (
             "Timestamp of the cell at row r, col c (0-indexed) in sheet_XXXX.jpg "
             "(XXXX is 1-based) = ((XXXX-1) * cells_per_sheet + r*grid_cols + c) * frame_interval. "
