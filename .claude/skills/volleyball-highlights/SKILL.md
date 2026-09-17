@@ -14,11 +14,13 @@ Two scripts do all the mechanical ffmpeg/yt-dlp work (`scripts/prepare.py`, `scr
 Check once per environment, don't assume they're installed:
 
 ```bash
-which ffmpeg ffprobe   # required always
-which yt-dlp           # only required if the source is a YouTube URL
+which ffmpeg            # required always (ffprobe is used if present, but not required)
+which yt-dlp            # only required if the source is a YouTube URL
 ```
 
-If missing, install with the environment's package manager (e.g. `apt-get install -y ffmpeg`, `brew install ffmpeg yt-dlp`, or `pip install yt-dlp`). Don't proceed until `ffmpeg`/`ffprobe` are on PATH.
+If missing, install with the environment's package manager (`apt-get install -y ffmpeg`, `brew install ffmpeg yt-dlp`). If system package installs aren't available (no `apt`/`brew` access), both scripts fall back to `ffmpeg`'s own stderr banner for duration if `ffprobe` is missing, so `pip install yt-dlp` plus a pip-only ffmpeg (e.g. `pip install imageio-ffmpeg`, then put the binary it reports from `python3 -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())"` on PATH as `ffmpeg`) is enough to run the whole pipeline with zero system-level installs.
+
+**Network note:** downloading from YouTube needs outbound access to youtube.com from wherever this skill runs. Some sandboxed/cloud Claude Code environments restrict outbound network to an allow-list (e.g. GitHub + package registries only) and will block YouTube specifically even though PyPI works fine for installing yt-dlp itself — check the environment's network policy if `yt-dlp` fails to connect. If YouTube is blocked in the current session, either run this skill somewhere with normal internet access (a local Claude Code session, most straightforwardly), or download the video yourself with `yt-dlp` locally and pass the resulting file path to `--input` instead of the URL.
 
 ## Step 1 — Prepare (mechanical, run the script)
 
@@ -92,5 +94,5 @@ Tell the user where `highlight_reel.mp4` and the individual `clips/` ended up, a
 
 - No commentary/captions means there's no semantic signal — this is loudness + scoreboard timing only, tuned by hand, not a highlight-quality model. It doesn't know a great defensive dig from a lucky net roll unless the crowd reacts.
 - If the venue is quiet (small crowd, no PA), the audio-peak step is less reliable; consider using ffmpeg motion/scene-change detection as an additional anchor if this becomes a problem often — not implemented yet.
-- The contact-sheet tile filter drops trailing frames that don't fill a complete grid, so the last few seconds of the match may not get sampled. Use a smaller `--grid` or `--frame-interval` if the match's final point matters.
+- If the total sampled frames don't divide evenly into the grid, the final contact sheet is padded with black cells rather than dropped — you'll see solid black where a cell has no frame. Don't try to read a score out of a black cell; it just means the match ended before that slot.
 - This is per-match manual-ish work (you read every contact sheet) — it trades subscription cost for your time reading images. If that trade stops being worth it for high volume, revisit with a real vision-based action-spotting model.

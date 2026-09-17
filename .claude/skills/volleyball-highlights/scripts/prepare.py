@@ -30,13 +30,22 @@ def run(cmd: list[str]) -> subprocess.CompletedProcess:
 
 
 def ffprobe_duration(path: Path) -> float:
-    result = run([
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(path),
-    ])
-    if result.returncode != 0 or not result.stdout.strip():
-        sys.exit(f"error: ffprobe could not read duration of {path}\n{result.stderr}")
-    return float(result.stdout.strip())
+    """Prefer ffprobe; fall back to parsing ffmpeg's own stderr banner if ffprobe
+    isn't installed (e.g. pip-installed imageio-ffmpeg ships ffmpeg but not ffprobe)."""
+    if shutil.which("ffprobe"):
+        result = run([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        ])
+        if result.returncode == 0 and result.stdout.strip():
+            return float(result.stdout.strip())
+
+    result = run(["ffmpeg", "-i", str(path)])
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr)
+    if not match:
+        sys.exit(f"error: could not determine duration of {path} (ffprobe missing and ffmpeg banner unparseable)")
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
 def acquire_source(source: str, workdir: Path) -> Path:
@@ -137,7 +146,6 @@ def main() -> None:
     args = ap.parse_args()
 
     require("ffmpeg")
-    require("ffprobe")
 
     workdir = Path(args.workdir).expanduser().resolve()
     workdir.mkdir(parents=True, exist_ok=True)
@@ -171,8 +179,8 @@ def main() -> None:
         "note": (
             "Timestamp of the cell at row r, col c (0-indexed) in sheet_XXXX.jpg "
             "(XXXX is 1-based) = ((XXXX-1) * cells_per_sheet + r*grid_cols + c) * frame_interval. "
-            "Trailing frames that don't fill a full grid may be dropped by ffmpeg's tile filter; "
-            "if the match tail matters, rerun with a smaller grid or interval."
+            "If total frames don't divide evenly into the grid, the final sheet's leftover "
+            "cells are padded solid black (not a real frame) -- ignore those when reading scores."
         ),
     }
     manifest_path = workdir / "manifest.json"

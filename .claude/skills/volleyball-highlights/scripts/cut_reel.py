@@ -9,6 +9,7 @@ around that moment, and stitches them into a single reel.
 """
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +23,25 @@ def require(binary: str) -> None:
 
 def run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def probe_duration(path: Path) -> float | None:
+    if shutil.which("ffprobe"):
+        result = run([
+            "ffprobe", "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        ])
+        if result.returncode == 0 and result.stdout.strip():
+            try:
+                return float(result.stdout.strip())
+            except ValueError:
+                pass
+    result = run(["ffmpeg", "-i", str(path)])
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr)
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
 def find_peak(rms_points: list[tuple[float, float]], start: float, end: float) -> float | None:
@@ -63,14 +83,20 @@ def compute_clip_windows(
 
 
 def cut_clip(source: Path, start: float, end: float, out_path: Path) -> bool:
+    expected_len = end - start
     cmd = [
         "ffmpeg", "-y", "-ss", f"{start:.2f}", "-to", f"{end:.2f}",
         "-i", str(source), "-c", "copy", "-avoid_negative_ts", "make_zero", str(out_path),
     ]
     result = run(cmd)
     if result.returncode == 0 and out_path.exists() and out_path.stat().st_size > 0:
-        return True
-    # Fallback: stream copy can fail to cut cleanly on non-keyframe boundaries; re-encode instead.
+        actual_len = probe_duration(out_path)
+        # Stream copy can only cut on keyframes; with a sparse-keyframe source it can silently
+        # snap to a keyframe far from the intended point and produce a wildly wrong-length clip.
+        tolerance = max(2.0, 0.25 * expected_len)
+        if actual_len is not None and abs(actual_len - expected_len) <= tolerance:
+            return True
+    # Fallback: re-encode for a frame-accurate cut instead of a keyframe-aligned one.
     cmd = [
         "ffmpeg", "-y", "-ss", f"{start:.2f}", "-to", f"{end:.2f}",
         "-i", str(source), "-c:v", "libx264", "-c:a", "aac", str(out_path),
