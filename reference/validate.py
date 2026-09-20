@@ -89,19 +89,44 @@ def test_regimes():
     return ok
 
 
-def test_reversal_shows_transition():
-    print("\n=== 2. Reversal passes through Transition, not straight Up->Down ===")
+def test_reversal_is_never_a_direct_flip():
+    """The invariant: Up and Down are never adjacent.
+
+    Which neutral state sits between them (Sideways for a choppy handover,
+    Transition for a decisive one) is a property of the tape, not a guarantee
+    -- so asserting a specific one here would be testing the fixture rather
+    than the engine. What must always hold is that the indicator never claims
+    a clean reversal it cannot support.
+    """
+    print("\n=== 2. Up and Down are never adjacent states ===")
     up = path_trend(300, +0.40, seed=21)
     down = path_trend(300, -0.40, start=up[-1], seed=22)
     res = run(make_bars(up + down), lookback=50)
     states = [r["state"] for r in res]
-    # walk the handover window and look for a non-directional state between
-    seg = states[280:420]
-    saw_transition = TRANSITION in seg
-    direct_flip = any(a == UP and b == DOWN for a, b in zip(states, states[1:]))
-    good = saw_transition and not direct_flip
-    print(f"  {'PASS' if good else 'FAIL'}  transition seen={saw_transition}  "
-          f"direct Up->Down flip={direct_flip}")
+    direct = sum(1 for a, b in zip(states, states[1:]) if {a, b} == {UP, DOWN})
+    bridged = any(s in (SIDEWAYS, TRANSITION) for s in states[280:420])
+    good = direct == 0 and bridged
+    print(f"  {'PASS' if good else 'FAIL'}  direct Up<->Down flips={direct}  "
+          f"neutral state bridges the reversal={bridged}")
+    return good
+
+
+def test_transition_stays_reachable():
+    """Guard against the mirror of the bug the efficiency gate fixed.
+
+    The gate routes low-efficiency disagreement to Sideways. Set too high, it
+    would swallow Transition entirely and we'd have swapped one unreachable
+    state for another.
+    """
+    print("\n=== 2b. Transition is still reachable (anti-regression) ===")
+    closes = path_trend(200, +0.40, seed=61)
+    closes += path_trend(200, -0.40, start=closes[-1], seed=62)
+    closes += path_trend(200, +0.40, start=closes[-1], seed=63)
+    res = run(make_bars(closes), lookback=50)
+    share = pct(res, TRANSITION, 70, len(res))
+    good = share > 1.0
+    print(f"  {'PASS' if good else 'FAIL'}  Transition on {share:.1f}% of bars "
+          f"(needs to be non-vestigial)")
     return good
 
 
@@ -167,7 +192,8 @@ def main():
     random.seed(0)
     results = [
         test_regimes(),
-        test_reversal_shows_transition(),
+        test_reversal_is_never_a_direct_flip(),
+        test_transition_stays_reachable(),
         test_insufficient_first(),
         test_no_lookahead(),
         test_stability_and_sensitivity(),

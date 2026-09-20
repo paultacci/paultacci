@@ -22,10 +22,13 @@ truth for "is this getting done."
 | 7 | Python reference engine + validation harness | ✅ Done | 2026-09-20 | `reference/` — all 6 logic checks pass |
 | 8 | Off-chart logic validation & sensitivity sweep | ✅ Done | 2026-09-20 | `docs/validation-report.md` — found and fixed the Sideways bug |
 | 9 | Eliminate top compile risk | ✅ Done | 2026-09-20 | `f_calc()` now reads global inputs instead of taking length params |
-| 10 | **Compile-check on TradingView** | ⬜ Not started | | **Blocking.** Never compiled — no TradingView access from the build environment. BUILD_PLAN Part A |
-| 11 | Verify non-repaint behavior on chart | ⬜ Not started | | BUILD_PLAN B2 |
-| 12 | Sanity-check states vs. real NQ price action | ⬜ Not started | | BUILD_PLAN B3 — logic is validated, tuning is not |
-| 13 | Flip-rate measurement on real bars | ⬜ Not started | | BUILD_PLAN B4 |
+| 10 | Real-market-data validation (4 datasets) | ✅ Done | 2026-09-20 | `reference/validate_real.py` — index futures 5m/daily, NVDA daily, BTC hourly |
+| 11 | Confirmation-delay measurement (spec §6.3) | ✅ Done | 2026-09-20 | Median 14–28 bars depending on timeframe |
+| 12 | Evidence-based default selection | ✅ Done | 2026-09-20 | L=50/H=2 → **L=75/H=3**, dominant on both axes across all 4 datasets |
+| 13 | Pine static analysis (parse + built-in check) | ✅ Done | 2026-09-20 | Parses clean, 2,881 nodes; every built-in verified real |
+| 14 | **Compile-check on TradingView** | ⬜ Not started | | **Blocking.** Syntax is now statically verified; type-qualifier and runtime behavior still need the real compiler |
+| 15 | Verify non-repaint behavior on chart | ⬜ Not started | | BUILD_PLAN B2 |
+| 16 | Confirm settings feel right on real NQ | ⬜ Not started | | Defaults are evidence-based but not NQ-specific |
 
 ## Review findings from step 5 (v1 → v2)
 
@@ -49,17 +52,29 @@ truth for "is this getting done."
 | 11 | Guidance claimed the min-swing filter was the first anti-flicker lever; measured impact is negligible (57 → 54 flips) | Wrong advice | ✅ Usage guide corrected — lookback is the real lever (87 → 47 flips) |
 | 12 | Length parameters passed through a function boundary into `ta.atr()` etc. risked a `simple int` vs `series int` compile error inside `request.security()` | Top compile risk | ✅ `f_calc()` reads the global inputs directly |
 
+## Findings from step 10-13 (real data + static analysis)
+
+| # | Finding | Severity | Resolution |
+|---|---|---|---|
+| 13 | On **real** bars the Sideways bug was worse than synthetic showed: 3% Sideways / 61% Transition without the efficiency gate | Confirms #10 | ✅ Gate validated on real data: 48% / 16%, with Up/Down identical at every cutoff |
+| 14 | Previous defaults (L=50, H=2) were **Pareto-dominated** — L=75/H=3 is 31% steadier *and* 23% faster to confirm, across all four datasets | Tuning | ✅ Defaults changed; "Steady" preset documented as the alternative |
+| 15 | Optimizing on the 5-min futures set alone picked L=100/H=5; the multi-dataset average picked L=75/H=3. Single-tape tuning would have chosen wrong | Method | ✅ Recorded as a standing requirement for any future retuning |
+| 16 | Real feeds contain garbage: the BTC set uses `1.7e308` as a missing-data sentinel and crashed the engine with `OverflowError` | Robustness | ✅ Engine carries the last good bar forward on any non-finite print (same as a halt, spec §9) |
+| 17 | The synthetic reversal test asserted Transition specifically; real data shows reversals legitimately bridge via Sideways ~85% of the time | Bad test | ✅ Test now asserts the real invariant (Up and Down never adjacent — holds on 100% of real bars) plus an anti-regression check that Transition stays reachable |
+| 18 | Measurement bug: the zigzag grading key initialized `direction = 0`, letting the extreme track price both ways, so it found zero turning points and delay silently reported `nan` | Bad test | ✅ Rewritten; delay is now measured |
+
 ## Known unverified risk
 
-The script has **never been compiled** — TradingView is unreachable from the
-build environment. `BUILD_PLAN.md` Part A lists the constructs most likely to
-fail, each with a prescribed fallback. The highest-risk item (type-qualifier
-propagation into `ta.*` calls inside `request.security()`) has since been
-designed out rather than left to chance.
+The script has **never been run by TradingView**. It now passes static
+analysis (`pynescript`): it parses cleanly as v5 and v6, and every built-in it
+calls is real. That rules out syntax, indentation and typo errors. What static
+analysis cannot check — and what still needs the real compiler — is
+`simple` vs `series` type-qualifier rules, the `request.*` call budget, and
+runtime behavior. `BUILD_PLAN.md` Part A lists these with fallbacks.
 
-Separately: the engine's **logic** is now validated off-chart via
-`reference/`, but its **tuning** is not. Synthetic data cannot tell you how
-the defaults feel on a real 5m NQ chart at the open.
+Tuning is now evidence-based across four real datasets, but **none of them is
+NQ**. They establish the engine behaves sensibly across market types; they
+cannot tell you how it feels on a 5m NQ chart at the cash open.
 
 ## Open questions / decisions pending
 

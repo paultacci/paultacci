@@ -1,95 +1,147 @@
-# Validation Report — off-chart logic testing
+# Validation Report
 
-Produced by `reference/validate.py` against `reference/mtf_trend.py`, the
-Python twin of the Pine engine. Reproduce with:
+Two harnesses, both runnable without a chart:
 
 ```
-python3 reference/validate.py
+python3 reference/validate.py        # synthetic regimes: is the logic right?
+python3 reference/fetch_real_data.py # pull public OHLC datasets
+python3 reference/validate_real.py   # real bars: how does it behave?
 ```
 
-## Why synthetic data
+## Data used, and its limits
 
-Live market data is unreachable from the build environment (the network
-policy denies Yahoo Finance and Stooq), so these runs use a regime-switching
-price simulator: trending segments with drift, mean-reverting segments
-without, and plausible intrabar ranges.
+NQ intraday history is not freely downloadable, and this build environment's
+network policy blocks the usual market-data hosts. Public OHLC datasets on
+GitHub are reachable, so validation runs against four real series chosen for
+structural coverage rather than for being NQ:
 
-**This validates logic, not tuning.** It proves the state machine labels a
-known uptrend as Up and a known range as Sideways, and that nothing peeks at
-future bars. It cannot tell you the right lookback for NQ at 9:45am — that
-still requires real bars in TradingView.
-
-## Results (all passing)
-
-| Check | Spec ref | Result |
+| Dataset | Bars | Why it's here |
 |---|---|---|
-| Clean uptrend → Up | §6.1 | Up on 86% of bars |
-| Clean downtrend → Down | §6.1 | Down on 72% of bars |
-| Quiet range → Sideways | §6.1 | Sideways on 71% of bars |
-| Reversal passes through Transition, never a direct Up→Down flip | §6.1 | Transition observed; zero direct flips |
-| Cold start reports Insufficient rather than guessing | §6.5 | First 50 bars all Insufficient |
-| No lookahead: bar-by-bar replay matches batch computation | §6.5 | 0 mismatches |
+| Index futures, 5-minute | 2,142 | Closest available NQ analog: an index future, intraday, real session gaps |
+| Index futures, daily | 512 | Same instrument, slower timeframe |
+| NVDA daily 1999–2014 | 4,012 | Real crashes and manias; single-name equity with overnight gaps |
+| BTC hourly | 11,561 | 24/7 market with no session breaks — tests the spec §9 cross-market claims |
 
-## The bug this harness found
+**This is not NQ.** It establishes that the engine behaves sensibly across
+market types and timeframes; it does not establish the right settings for NQ
+at the cash open. That still needs real NQ bars in TradingView.
 
-Before the fix, a quiet range was labelled **Sideways 7% / Transition 64%** —
-the state the indicator exists to show was effectively unreachable. Cause: the
-composite required *both* measures to read flat, but a regression t-statistic
-over a noisy 50-bar window rarely sits inside a ±1.5 band, so ranges resolved
-to "measures disagree" = Transition. Meanwhile the efficiency ratio, the one
-measure that actually identifies chop, was computed and displayed but never
-consulted in the decision.
+## Behavior on real bars (at current defaults)
 
-Fix: when the two direction measures disagree, efficiency decides whether that
-disagreement is chop (Sideways) or a genuine regime handover (Transition).
-
-| Range cutoff | Range: %Sideways | Range: %Transition | Uptrend: %Up |
-|---|---|---|---|
-| 0.00 (old) | 7 | 64 | 86 |
-| 0.15 | 63 | 6 | 86 |
-| 0.20 | 70 | 1 | 86 |
-| **0.25 (chosen)** | **71** | **0** | **86** |
-| 0.35 | 71 | 0 | 86 |
-| 0.40 | 71 | 0 | 87 |
-
-`0.25` sits at the knee: it makes Sideways reachable without pushing
-Transition to zero on mixed tapes (still 4% there), so genuine reversals are
-still flagged. Uptrend detection is untouched at every setting — the gate
-filters chop without suppressing trends.
-
-## Parameter sensitivity (§6.4)
-
-Run over a deliberately awkward tape (range → weak trend → range, 750 bars).
-
-| Lookback | Threshold | Flips | %Up | %Sideways | %Transition |
+| Dataset | Up | Down | Sideways | Transition | Stability |
 |---|---|---|---|---|---|
-| 20 | 1.0 | 96 | 30 | 45 | 8 |
-| 20 | 2.5 | 75 | 26 | 54 | 8 |
-| 50 | 1.0 | 56 | 34 | 49 | 4 |
-| **50** | **1.5** | **54** | **33** | **51** | **4** |
-| 50 | 2.5 | 50 | 30 | 55 | 4 |
-| 100 | 1.5 | 47 | 34 | 54 | 2 |
-| 100 | 2.5 | 43 | 33 | 56 | 2 |
+| Index futures 5-min | 22% | 13% | 52% | 13% | 1 change per 14 bars |
+| Index futures daily | 34% | 3% | 54% | 9% | 1 per 14 |
+| NVDA daily | 21% | 13% | 59% | 6% | 1 per 16 |
+| BTC hourly | 22% | 11% | 58% | 9% | 1 per 14 |
 
-**Lookback dominates flip rate**; threshold mostly shifts bars between Up and
-Sideways rather than changing stability much.
+Markets read as directionless roughly half the time and trending the rest,
+consistently across instrument types — which matches how markets actually
+behave, and is the sanity check that matters most here.
 
-Hysteresis: `1 → 66 flips, 2 → 57, 3 → 57, 5 → 40`. Note 2 → 3 buys nothing;
-the next real step is 5.
+**Zero direct Up↔Down flips on every dataset.** The indicator never jumps
+between opposite trends without a neutral state in between. Of that neutral
+time, 81–90% is Sideways and 10–19% Transition.
 
-Minimum swing filter: `0.0 → 57, 0.5 → 55, 1.0 → 54`. **Negligible** — this
-was expected to be the main anti-flicker lever and empirically is not. The
-usage guide was corrected accordingly.
+## Confirmation delay (spec §6.3)
 
-## Current defaults, and what still needs real data
+Measured against ex-post turning points from a large-threshold zigzag used
+purely as a grading key (it looks ahead by construction, which is exactly why
+it never appears in the engine).
 
-Defaults (`lookback 50, threshold 1.5, hysteresis 2, range cutoff 0.25`) are
-now evidence-backed rather than guessed, but on synthetic data. Open items
-for real NQ bars:
+| Dataset | Median delay | p90 |
+|---|---|---|
+| Index futures 5-min | 28 bars | 50 |
+| Index futures daily | 14 bars | 23 |
+| NVDA daily | 15 bars | 33 |
+| BTC hourly | 18 bars | 44 |
 
-- Absolute flip rate per session — synthetic tapes can't tell you whether 54
-  flips per 750 bars feels right on a 5m NQ chart.
-- Behavior across the overnight/RTH handover, where real volatility shifts
-  sharply and synthetic data is stationary by construction.
-- Fat tails and gaps: real NQ produces single-bar moves the simulator's
-  Gaussian steps never generate.
+The engine also never catches roughly a quarter to a third of the smaller
+legs at all. That is by design, not a defect: it is a context indicator with
+a confirmation requirement, so it deliberately sits in Sideways through minor
+swings rather than calling each one a trend. If you need every swing, this is
+the wrong tool.
+
+## The bug the harness found: Sideways was unreachable
+
+Before the fix, the composite required *both* measures to read flat, but a
+regression t-statistic over a noisy window rarely is — so ranges resolved to
+"measures disagree" = Transition. The efficiency ratio, the one measure that
+identifies chop, was computed and displayed but never consulted.
+
+Fix: when the measures disagree, efficiency decides whether that is chop
+(Sideways) or a genuine handover (Transition).
+
+Measured on the real 5-minute index futures set:
+
+| Range cutoff | %Sideways | %Transition | %Up | %Down |
+|---|---|---|---|---|
+| 0.00 (old behavior) | **3** | **61** | 22 | 13 |
+| 0.15 | 38 | 26 | 23 | 13 |
+| **0.25 (chosen)** | **48** | **16** | 22 | 13 |
+| 0.35 | 58 | 6 | 22 | 13 |
+| 0.50 | 64 | 1 | 22 | 13 |
+
+Real data showed the bug to be worse than synthetic did (3% vs 7% Sideways).
+Note Up and Down are **identical at every cutoff** — the gate provably filters
+chop without touching trend detection. `0.25` keeps Transition alive at 16%;
+by `0.50` it is nearly gone, which would just swap one unreachable state for
+another. `reference/validate.py` now has an anti-regression test for exactly
+that.
+
+## Default selection (spec §6.4)
+
+Defaults were changed from `L=50, H=2` to **`L=75, threshold=1.5, H=3`**,
+averaged across all four datasets:
+
+| Setting | Bars per flip (higher = steadier) | Median delay (lower = faster) |
+|---|---|---|
+| L=50, H=2 (previous default) | 11.1 | 18.8 |
+| L=50, H=5 | 18.2 | 20.1 |
+| L=100, H=2 | 13.7 | 15.6 |
+| **L=75, H=3 (new default)** | **14.5** | **14.4** |
+| L=100, H=5 | 21.6 | 19.4 |
+| L=100, thr=2.5, H=5 | 22.3 | 24.8 |
+
+`L=75, H=3` **strictly dominates the previous default on both axes** — 31%
+steadier *and* 23% faster to confirm. That is not a tradeoff, so it was taken.
+
+If you want maximum steadiness and will accept slower confirmation, **L=100,
+H=5** is the other defensible point on the frontier (21.6 bars per flip).
+
+### A caution worth recording
+
+On the 5-minute futures set *alone*, `L=100/H=5` looked best. Across all four
+datasets, `L=75/H=3` won. Optimizing on one tape would have picked the wrong
+answer — which is precisely the overfitting spec §6.4 warns about. Any future
+retuning should clear the same multi-dataset bar.
+
+## Other findings
+
+- **Min swing filter is not the anti-flicker lever.** Measured impact was
+  negligible (57 → 54 flips). Lookback dominates. Earlier guidance said the
+  opposite and was corrected.
+- **Hysteresis is uneven**: 1→2 helps, 2→3 helped little on synthetic but
+  contributed on real data, 5 is the next real step.
+- **Real feeds contain garbage.** The BTC set uses `1.7e308` as a
+  missing-data sentinel in 1,454 rows and crashed the engine with an
+  `OverflowError`. The engine now carries the last good bar forward on any
+  non-finite or non-positive print — the same situation as a halt, which spec
+  §9 requires handling.
+
+## Pine script static checks
+
+The `.pine` file has still never been run by TradingView, but it now passes
+two static checks via the `pynescript` parser:
+
+- **Parses cleanly** as both v5 and v6 (2,881 AST nodes, no syntax errors),
+  which rules out the indentation, paren and line-continuation errors that
+  most often bite when writing Pine without a compiler.
+- **Every built-in it calls exists**: `ta.atr`, `ta.change`, `ta.correlation`,
+  `ta.pivothigh`, `ta.pivotlow`, `math.abs/sqrt/sum`, `str.tostring`,
+  `table.new/cell`, `request.security`, `timeframe.in_seconds`, the `input.*`
+  family, `alertcondition`, `bgcolor`, `barcolor`, `color.new`, `na`.
+
+What static parsing still cannot confirm: type-qualifier rules
+(`simple` vs `series`), `request.*` call budget, and runtime behavior. Those
+need the real compiler.

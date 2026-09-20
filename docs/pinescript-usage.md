@@ -60,13 +60,24 @@ are in `docs/multi-timeframe-market-context-indicator.md`.
 
 | Setting | What it trades off |
 |---|---|
-| Regression/efficiency lookback | **The strongest lever on flicker.** Measured: 20 bars = 87 state changes, 50 = 54, 100 = 47 over the same tape. Higher = steadier but slower to react |
-| Hysteresis | Real but uneven: 1 → 2 cut flips 66→57, 2 → 3 changed nothing, 5 cut them to 40. Use 2, or jump to 5 if it's still noisy |
+| Regression/efficiency lookback | **The strongest lever on flicker.** Default 75. Lower = faster but noisier; higher = steadier but slower |
+| Hysteresis | Default 3. Raise to 5 if you want noticeably fewer colour changes and will accept slower confirmation |
 | Range cutoff (efficiency) | How much "going nowhere" counts as Sideways rather than Transition when the two direction checks disagree. Raising it makes more chop read as Sideways |
 | Slope significance (t-stat) | Higher = more conservative about declaring a trend; shifts bars from Up/Down into Sideways |
 | Swing fractal bars | Higher = fewer false swings, more lag on Structure |
 | Min swing size (x ATR) | Off by default, and **measured impact was negligible** (57 → 54 flips at 1.0×ATR). Try the lookback first |
 | Wait for confirmed close | Off = higher timeframes update live intrabar (faster, can flicker); On = only shows a fully closed higher-timeframe bar (matches backtest exactly, one bar slower) |
 
+### Two validated presets
+
+| | Lookback | Threshold | Hysteresis | Character |
+|---|---|---|---|---|
+| **Balanced (default)** | 75 | 1.5 | 3 | ~1 colour change per 14-16 bars, median ~14 bars to confirm a real turn |
+| **Steady** | 100 | 1.5 | 5 | ~1 change per 22 bars, slower to confirm — fewer distractions |
+
+Both were picked by measuring across four real datasets (index futures 5-min
+and daily, NVDA daily, BTC hourly) rather than tuned to one chart. See
+`docs/validation-report.md` for the numbers.
+
 Don't change these blind — tune them by watching real NQ price action per
-`docs/project-plan.md` step 6/7, and update `PROGRESS.md` when you do.
+`docs/project-plan.md`, and update `PROGRESS.md` when you do.

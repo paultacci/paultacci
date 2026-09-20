@@ -9,6 +9,7 @@ one, which is what makes the replay test in validate.py meaningful.
 """
 
 from dataclasses import dataclass, field
+from math import isfinite
 
 INSUFFICIENT, UP, DOWN, SIDEWAYS, TRANSITION = 0, 1, -1, 2, 3
 
@@ -27,9 +28,9 @@ DIR_NONE, DIR_UP, DIR_DOWN, DIR_FLAT = 0, 1, -1, 2
 @dataclass
 class TrendEngine:
     fractal_n: int = 2
-    lookback: int = 50
+    lookback: int = 75
     slope_threshold: float = 1.5
-    hysteresis: int = 2
+    hysteresis: int = 3
     atr_len: int = 14
     min_swing_mult: float = 0.0
     vol_floor: float = 0.0
@@ -142,6 +143,15 @@ class TrendEngine:
         return SIDEWAYS if er < self.range_er else TRANSITION
 
     def update(self, high, low, close):
+        # Real feeds emit unusable prints: halts, gaps, and sentinel values
+        # like 1.7e308 standing in for "missing". Carrying the last good bar
+        # forward keeps bar alignment and asserts no movement, rather than
+        # letting garbage poison every window it touches.
+        if not all(isfinite(v) and v > 0 for v in (high, low, close)):
+            if not self.closes:
+                return self._emit(DIR_NONE, DIR_NONE, None, 0.0)
+            high, low, close = self.highs[-1], self.lows[-1], self.closes[-1]
+
         self.highs.append(high)
         self.lows.append(low)
         self.closes.append(close)
@@ -167,9 +177,12 @@ class TrendEngine:
             self.pending_state = raw
             self.pending_count = 0
 
+        return self._emit(struct_dir, slope_dir, tstat, er, raw)
+
+    def _emit(self, struct_dir, slope_dir, tstat, er, raw=None):
         return {
             "state": self.confirmed_state,
-            "raw": raw,
+            "raw": self.confirmed_state if raw is None else raw,
             "structure": struct_dir,
             "slope": slope_dir,
             "tstat": tstat,

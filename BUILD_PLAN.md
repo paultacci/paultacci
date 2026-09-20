@@ -151,6 +151,12 @@ Load a known strongly trending NQ day and a known chop day (use bar replay).
 day reads Sideways with Weak efficiency. If a chop day reads as a trend, the
 slope threshold is too low — report the finding, don't silently retune.
 
+### B3b. Already measured off-chart — confirm, don't redo
+`docs/validation-report.md` has state mix, flip rate, confirmation delay and
+parameter sweeps across four real datasets, plus static parse results. Read it
+before doing any tuning work so you are confirming findings on NQ rather than
+rediscovering them.
+
 ### B4. Measure flip rate (spec §6.2)
 Count confirmed-state changes on the chart timeframe over one full session at
 defaults. If it exceeds ~6–8 flips/session on 5m, tune in this order:
