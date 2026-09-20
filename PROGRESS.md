@@ -78,7 +78,8 @@ cannot tell you how it feels on a 5m NQ chart at the cash open.
 
 ## Open questions / decisions pending
 
-- [ ] Confirm platform: TradingView/Pine Script assumed, not confirmed.
+- [x] Platform confirmed: **TradingView / Pine Script** (2026-09-20).
 - [ ] Four visible states (default) vs. three via Simple mode — which default?
 - [ ] Confirm default timeframe ladder (chart TF + 1H + 4H + 1D).
-- [ ] Any default parameter changes arising from flip-rate/sensitivity work.
+- [ ] Balanced (L=75/H=3, current) vs. Steady (L=100/H=5) preset as default —
+      both validated; this is a feel preference, so it's Paul's call.

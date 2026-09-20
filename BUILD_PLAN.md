@@ -39,8 +39,10 @@ collapses the multi-timeframe read into a single trade recommendation.
 |---|---|---|
 | `docs/multi-timeframe-market-context-indicator.md` | Full design spec: two direction measures, separate strength, state definitions, evaluation criteria, cross-market adaptation | Complete, authoritative |
 | `docs/project-plan.md` | Goal, outline, step plan | Complete |
-| `docs/pinescript-usage.md` | End-user install/read guide | Needs update to 5-state model |
-| `pinescript/nq_mtf_trend_context.pine` | v2 implementation | **Written but never compiled** |
+| `docs/pinescript-usage.md` | End-user install/read guide | Current |
+| `pinescript/nq_mtf_trend_context.pine` | Implementation | **Statically parsed, never run by TradingView** |
+| `docs/validation-report.md` | Off-chart validation on synthetic + 4 real datasets | Current |
+| `reference/` | Python twin of the engine, test harnesses, data fetcher | Current |
 | `PROGRESS.md` | Checkpoint tracker | Live |
 
 ### Algorithm summary (as implemented)
@@ -68,9 +70,11 @@ measure feed a hysteresis state machine:
 
 ## 3. Part A — Review tasks (do these first)
 
-I wrote this code **without the ability to compile it** — TradingView is not
-reachable from the authoring environment. The following are specific,
-known-uncertain areas. Verify each in the Pine Editor and fix what breaks.
+This code has **never been run by TradingView** — it is unreachable from the
+authoring environment. It does pass static analysis via `pynescript` (parses
+clean as v5 and v6; every built-in it calls verified to exist), so syntax and
+typo errors are ruled out. What remains are semantic checks a parser cannot
+do. Verify each in the Pine Editor and fix what breaks.
 
 ### A1. Type-qualifier propagation — ✅ already designed out
 
@@ -121,7 +125,9 @@ tests start validating a version that no longer ships.
 Read the state machine against spec §6.1 and confirm the implementation
 matches the table there exactly, particularly:
 
-- Sideways requires **both** `structDir == 2` and `slopeDir == 2`.
+- Sideways is reached two ways: both measures flat, **or** the measures
+  disagree while efficiency is below the range cutoff. The second path is
+  load-bearing — without it Sideways is unreachable (see validation report).
 - Any single measure reporting insufficient forces the whole state to
   insufficient (never silently treat missing data as "flat").
 - Hysteresis counts *consecutive* bars of the same candidate state, and
