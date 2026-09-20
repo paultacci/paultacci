@@ -6,7 +6,7 @@ indicator("NQ Multi-Timeframe Trend Context", shorttitle="MTF Trend", overlay=tr
 // ---------- Inputs ----------
 grpMode = "Trend Definition"
 otcMode      = input.bool(true, "OTC mode (structure only, as taught in class)", group=grpMode, tooltip="On: direction comes from swing structure alone and anything that isn't a clean sequence is Sideways -- Bernd's rule from the supply & demand course. No Transition state exists in this mode. Off: structure must also agree with a volatility-normalized slope, and disagreement between them shows as Transition.")
-structPivots = input.int(3, "Swing pivots per side", minval=2, maxval=4, group=grpMode, tooltip="3 = the OTC six-pivot rule (three highs and three lows; needs two consecutive higher highs AND higher lows for an uptrend). 2 = looser, calls trends about twice as often.")
+structPivots = input.int(3, "Swing pivots per side", minval=2, maxval=4, group=grpMode, tooltip="How many rising steps an uptrend must show, on BOTH the highs and the lows.\n\n3 pivots = two higher highs AND two higher lows -- Bernd's rule, and the default.\n2 pivots = one of each; looser, calls trends about twice as often.\n4 pivots = three of each; stricter than taught.\n\nA higher low paired with a lower high is Sideways, never an uptrend -- confirmed against the lesson captions.")
 
 grpPivot = "Pivot Detection (ZigZag)"
 zzUsePct    = input.bool(false, "Use percentage threshold instead of ATR", group=grpPivot, tooltip="OTC marks pivots with a ZigZag set to a percentage (e.g. 3%). That works on one chart at a time, but a single percentage cannot serve a ladder from 5m to 1M -- on 5-minute bars a 3% ZigZag finds almost no pivots at all. ATR mode applies the same reversal logic scaled to each timeframe's own volatility.")

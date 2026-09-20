@@ -74,7 +74,9 @@ truth for "is this getting done."
 | 20 | OTC's rule answers high timeframes much sooner — it counts pivots instead of filling a lookback window (~27 monthly bars vs ~77) | Practical | ✅ Directly benefits the required 1W/1M rungs |
 | 21 | Pine's `request.*` budget would be strained by 11 timeframes × 6 outputs | Scaling | ✅ Four state ints packed into one float; 3 series per timeframe |
 | 22 | Two tests encoded assumptions from the pre-OTC default (Transition must exist; direction must wait for the lookback). Both are false in OTC mode *by design* | Bad test | ✅ Tests now name the mode they exercise and assert per-mode guarantees |
-| 23 | Pivot detection still differs from OTC's (N-bar fractal vs. percentage ZigZag) | **Open gap** | ⬜ Documented in `docs/otc-alignment.md` as the next alignment step |
+| 23 | Pivot detection differed from OTC's (N-bar fractal vs. ZigZag) | Methodology | ✅ ZigZag implemented; also fixed a latent issue where fractals could record two highs with no low between them |
+| 24 | A fixed ZigZag percentage cannot serve an 11-rung ladder — 3% found 2 pivots in 2,142 five-minute bars and never became decisive | **Would have broken the intraday rows** | ✅ ATR-scaled threshold is the default (1.5x); percentage mode kept as an option |
+| 25 | The AND reading of "two higher highs / two higher lows" was assumed, not verified | Unconfirmed assumption | ✅ Confirmed verbatim against the lesson's raw captions; Bernd's own worked example (higher low + lower high = sideways) rules OR out, and is now pinned as a regression test |
 
 ## Known unverified risk
 

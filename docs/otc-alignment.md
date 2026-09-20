@@ -149,15 +149,73 @@ datasets, the share of bars where one definition says Up while the other says
 Down is **0.0%**. They differ only in how readily they commit to a direction
 (66–68% exact agreement, 73–78% on direction), never in which direction.
 
+## The AND reading, confirmed against the raw captions
+
+Earlier notes here relied on a summary of the lesson. The question of whether
+an uptrend needs the highs **and** the lows rising, or either one, has now
+been checked against the video's own captions
+(`2024-09-28-bernd-youtube-K9F3_v59xJM.srt`). Verbatim, lightly punctuated:
+
+**The rule as stated:**
+
+> "what is required for an uptrend? So we define **higher lows and higher
+> highs** from current price… so two higher lows, that's the rule… and the
+> general rule is we identify six recent pivots, three lows and three highs,
+> to establish current trend."
+
+> "once we have two lower highs, two lower highs, then we have a downtrend by
+> definition. Sideways trend — also we need to have a clear definition for a
+> sideways trend: **if no clear trend is recognizable then define it as a
+> sideways trend**."
+
+**The worked example that settles it** — Swiss Franc weekly:
+
+> "you have here a lower high… but also you have a **higher low** here,
+> because it's higher than the previous low… **but also have you a lower
+> high** here, so you cannot clearly say, is it an uptrend, is it a
+> downtrend? So if you don't have a clear direction we say it's a sideways
+> trend."
+
+> "we had here higher highs, but here you see we have a lower high… and here
+> we have lower lows, but here we have a higher low… so do we have a clear
+> trend direction here, looking at the six most recent pivots? **No we don't
+> have.** So clearly we have a clear definition here of a weekly sideways
+> trend."
+
+A higher low is present in both examples. Under an OR reading that alone
+would make it an uptrend; Bernd explicitly refuses to call it one. **AND is
+confirmed**, and the implementation is correct as written.
+
+One honest nuance: his spoken shorthand is asymmetric — he leads with "two
+higher **lows**" for an uptrend and "two lower **highs**" for a downtrend.
+The framing sentence ("higher lows *and* higher highs") and both worked
+examples make clear that these are emphases, not the whole condition.
+
+**On the count:** "two higher lows" means two *comparisons*, which needs
+three lows — matching "three lows and three highs". That is exactly the
+shipped default (`Swing pivots per side = 3`). Requiring three higher highs
+would be stricter than taught, and is available as an option, not a default.
+
+Two further details from the captions corroborate choices already made:
+
+> "go on TradingView, use the **zigzag**, **reduce the percentage** that you
+> get more of these clear pivot points, use the arrows up and downs to define
+> the most six recent pivots"
+
+> "on the higher time frame where you do your location, it's important to do
+> it on the **same time frame**"
+
+The first confirms both the ZigZag and the practice of lowering the threshold
+until enough pivots appear — which is what the ATR-scaled default does
+automatically on each rung. The second confirms that each timeframe is
+assessed on its own, as the ladder does.
+
 ## Remaining gaps against OTC's method
 
 Worth being explicit about what still does not match:
 
-1. ~~Pivot detection differs.~~ **Closed** — see "Pivot detection" below.
-2. **"Two consecutive higher lows/highs" is read as AND**, i.e. an uptrend
-   needs both the highs and the lows rising. Bernd's sideways example (lower
-   high + higher low) supports this reading, but the phrasing in the lesson
-   summary is ambiguous and worth confirming against the video.
+1. ~~Pivot detection differs.~~ **Closed** — ZigZag implemented, see above.
+2. ~~The AND reading is unconfirmed.~~ **Closed** — confirmed verbatim above.
 3. **Impulse vs. correction is not modelled.** OTC uses it to decide *where
    to enter* within a trend. This indicator deliberately stops at context and
    has no entry logic, so it is out of scope by design.

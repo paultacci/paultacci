@@ -132,6 +132,40 @@ def test_transition_stays_reachable():
     return good
 
 
+def test_bernd_worked_example():
+    """A higher low paired with a lower high is Sideways, never a trend.
+
+    This is Bernd's own worked example from the supply & demand lesson (Swiss
+    Franc weekly), quoted in docs/otc-alignment.md: "you have a higher low
+    here... but also have you a lower high here, so you cannot clearly say, is
+    it an uptrend, is it a downtrend... we say it's a sideways trend."
+
+    It is the case that distinguishes the AND reading from the OR reading, so
+    it is pinned here: under OR, the higher low alone would read as an uptrend.
+    """
+    print("\n=== 2c. Contracting range (higher low + lower high) = Sideways ===")
+    # A converging triangle: each swing high lower, each swing low higher.
+    closes, hi, lo, cur, leg = [], 21000.0, 19000.0, 19000.0, 8
+    for _ in range(10):
+        for target in (hi, lo):
+            closes += [cur + (target - cur) * (k + 1) / leg for k in range(leg)]
+            cur = target
+        hi -= 90.0
+        lo += 90.0
+    eng = TrendEngine(zz_atr_mult=0.8)
+    states = [eng.update(h, l, c)["state"] for h, l, c in make_bars(closes, noise=0.05)]
+
+    hs, ls = eng.swing_highs, eng.swing_lows
+    fixture_ok = (len(hs) >= 3 and len(ls) >= 3
+                  and hs[-1] < hs[-2] < hs[-3] and ls[-1] > ls[-2] > ls[-3])
+    never_trended = all(s != UP and s != DOWN for s in states)
+    good = fixture_ok and never_trended
+    print(f"  {'PASS' if good else 'FAIL'}  fixture is lower-highs+higher-lows={fixture_ok}, "
+          f"never called Up/Down={never_trended} "
+          f"(final: {STATE_NAMES[states[-1]]})")
+    return good
+
+
 def test_insufficient_first():
     """Neither mode may claim a direction before it has its own inputs.
 
@@ -220,6 +254,7 @@ def main():
         test_regimes(),
         test_reversal_is_never_a_direct_flip(),
         test_transition_stays_reachable(),
+        test_bernd_worked_example(),
         test_insufficient_first(),
         test_no_lookahead(),
         test_stability_and_sensitivity(),
