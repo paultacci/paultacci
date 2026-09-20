@@ -83,8 +83,10 @@ Two reasons beyond simply matching the class:
    | Mode | Monthly row decisive after |
    |---|---|
    | Enhanced, lookback 75 | 77 bars (~6.4 years) |
-   | Enhanced, lookback 30 | 32 bars (~2.7 years) |
-   | **OTC mode** | **27 bars (~2.2 years)** |
+   | **OTC mode (ZigZag 1.5x ATR)** | **35 bars (~3 years)** |
+
+   (Measured with the ZigZag detection described below. At a 3x ATR threshold
+   it takes 93 monthly bars, which is why the default is not set higher.)
 
 The enhanced definition is still there — one toggle — and everything built
 for it (the slope measure, the Transition state, the efficiency gate) remains

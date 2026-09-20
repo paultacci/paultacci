@@ -33,7 +33,7 @@ has no concept of. It calls trends about twice as often.
   - Orange = **transition** — the two direction checks disagree. Usually a
     trend aging out or a reversal forming. Different from sideways on
     purpose: sideways is "nothing happening," transition is "something is
-    changing."
+    changing." *Only appears with OTC mode off.*
   - Gray = **insufficient data** (not enough history/volatility to call it)
 - **Table** (top-right by default): one row per enabled timeframe. The full
   ladder is 5m, 15m, 30m, 1H, 90m, 4H, 6H, 1D, 2D, 1W, 1M; enabled by default
@@ -56,19 +56,21 @@ has no concept of. It calls trends about twice as often.
 
 ## What's actually driving the color, in plain terms
 
-Each timeframe's state comes from two independent checks that both have to
-agree before it calls something a trend:
+**In OTC mode (the default)** a ZigZag marks alternating swing highs and lows,
+and the last three of each decide it: three rising highs *and* three rising
+lows is an uptrend, three falling of each is a downtrend, and **anything else
+is sideways**. That's Bernd's rule, and it's why the indicator sits in
+Sideways most of the time — so does the market.
 
-1. **Structure** — has price actually made a higher high + higher low (or
-   lower high + lower low)? This only updates once a swing is confirmed, so
-   it's slower but very literal.
-2. **Slope** — is the recent price drift statistically real relative to how
-   noisy the market's been (not just "it went up a little")? This reacts
-   faster but can wobble more.
+**With OTC mode off**, a second check joins in:
 
-If both agree on a direction → Up or Down. If both independently say "no
-direction" → Sideways. If they disagree → Transition. If either doesn't have
-enough data → Insufficient. The indicator will not force a directional label
+1. **Structure** — the swing sequence above.
+2. **Slope** — is the recent drift statistically real relative to how noisy
+   the market's been (not just "it went up a little")? Reacts faster, wobbles
+   more.
+
+Both agree on a direction → Up or Down. Both say "no direction" → Sideways.
+They disagree → Transition. Either lacks data → Insufficient. The indicator will not force a directional label
 just to look decisive. Full reasoning and the two candidate methods compared
 are in `docs/multi-timeframe-market-context-indicator.md`.
 
@@ -84,23 +86,20 @@ are in `docs/multi-timeframe-market-context-indicator.md`.
 | Use percentage instead of ATR | Switches the ZigZag to a fixed percentage like OTC teaches. Good on a single chart; **it will starve the intraday rows** — a 3% ZigZag finds almost no pivots on 5-minute bars |
 | Wait for confirmed close | Off = higher timeframes update live intrabar (faster, can flicker); On = only shows a fully closed higher-timeframe bar (matches backtest exactly, one bar slower) |
 
-### Two validated presets
-
-| | Lookback | Threshold | Hysteresis | Character |
-|---|---|---|---|---|
-| **Balanced (default)** | 75 | 1.5 | 3 | ~1 colour change per 14-16 bars, median ~14 bars to confirm a real turn |
-| **Steady** | 100 | 1.5 | 5 | ~1 change per 22 bars, slower to confirm — fewer distractions |
-
-Both were picked by measuring across four real datasets (index futures 5-min
-and daily, NVDA daily, BTC hourly) rather than tuned to one chart. See
-`docs/validation-report.md` for the numbers.
+At the shipped defaults, measured across four real datasets (index futures
+5-min and daily, NVDA daily, BTC hourly): **~1 colour change per 30-35 bars**,
+with sideways 59-78% of the time — sparing about when it calls a trend, which
+is the OTC character. Raise the reversal threshold for fewer changes still;
+lower it to react sooner. See `docs/validation-report.md` and
+`docs/otc-alignment.md` for the numbers behind the defaults.
 
 ### If the monthly or weekly row says "Insufficient"
 
 That's the honest answer, not a bug: a timeframe can't report until it has
-enough of its own bars. In OTC mode the monthly row needs ~27 monthly bars
-(~2.2 years); with OTC mode off and lookback 75, it needs ~77 (~6.4 years).
-If it won't populate, either leave OTC mode on or lower the lookback.
+enough of its own bars. In OTC mode the monthly row needs ~35 monthly bars
+(~3 years) to accumulate six pivots; with OTC mode off and lookback 75, it
+needs ~77 (~6.4 years). If it won't populate: leave OTC mode on, lower the
+reversal threshold, or lower the lookback.
 
 Don't change these blind — tune them by watching real NQ price action per
 `docs/project-plan.md`, and update `PROGRESS.md` when you do.
