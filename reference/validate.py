@@ -196,10 +196,10 @@ def test_stability_and_sensitivity():
         res = run(bars, lookback=50, hysteresis=h)
         print(f"    H={h}: {flips(res):3d} state changes over {len(bars)} bars")
 
-    print("\n  Min swing filter effect (hysteresis=2):")
-    for m in (0.0, 0.5, 1.0):
-        res = run(bars, lookback=50, hysteresis=2, min_swing_mult=m)
-        print(f"    min_swing={m:.1f}xATR: {flips(res):3d} state changes")
+    print("\n  ZigZag reversal threshold effect (hysteresis=2):")
+    for m in (1.0, 2.0, 3.0):
+        res = run(bars, lookback=50, hysteresis=2, zz_atr_mult=m)
+        print(f"    reversal={m:.1f}xATR: {flips(res):3d} state changes")
 
     print("\n  Lookback x threshold grid (flips / %Up / %Sideways / %Transition):")
     print(f"    {'L':>4} {'thr':>5} {'flips':>6} {'%Up':>6} {'%Side':>7} {'%Trans':>7}")

@@ -80,8 +80,8 @@ are in `docs/multi-timeframe-market-context-indicator.md`.
 | Hysteresis | Default 3. Raise to 5 if you want noticeably fewer colour changes and will accept slower confirmation |
 | Range cutoff (efficiency) | How much "going nowhere" counts as Sideways rather than Transition when the two direction checks disagree. Raising it makes more chop read as Sideways |
 | Slope significance (t-stat) | Higher = more conservative about declaring a trend; shifts bars from Up/Down into Sideways |
-| Swing fractal bars | Higher = fewer false swings, more lag on Structure |
-| Min swing size (x ATR) | Off by default, and **measured impact was negligible** (57 → 54 flips at 1.0×ATR). Try the lookback first |
+| Reversal threshold (x ATR) | The ZigZag's pivot sensitivity — the direct analog of OTC's ZigZag percentage. Lower = more pivots, more responsive; higher = fewer, steadier. Default 1.5 |
+| Use percentage instead of ATR | Switches the ZigZag to a fixed percentage like OTC teaches. Good on a single chart; **it will starve the intraday rows** — a 3% ZigZag finds almost no pivots on 5-minute bars |
 | Wait for confirmed close | Off = higher timeframes update live intrabar (faster, can flicker); On = only shows a fully closed higher-timeframe bar (matches backtest exactly, one bar slower) |
 
 ### Two validated presets

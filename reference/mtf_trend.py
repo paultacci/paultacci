@@ -27,13 +27,17 @@ DIR_NONE, DIR_UP, DIR_DOWN, DIR_FLAT = 0, 1, -1, 2
 
 @dataclass
 class TrendEngine:
-    fractal_n: int = 2
     lookback: int = 75
     slope_threshold: float = 1.5
     hysteresis: int = 3
     atr_len: int = 14
-    min_swing_mult: float = 0.0
     vol_floor: float = 0.0
+
+    # ZigZag reversal threshold: "pct" is OTC-faithful, "atr" auto-scales
+    # across the timeframe ladder. See _reversal_threshold().
+    zz_mode: str = "atr"
+    zz_pct: float = 3.0
+    zz_atr_mult: float = 1.5
     range_er: float = 0.25
 
     # 2 = compare the last two swing highs and lows (one comparison per side).
@@ -49,6 +53,8 @@ class TrendEngine:
 
     swing_highs: list = field(default_factory=list)
     swing_lows: list = field(default_factory=list)
+    zz_dir: int = 0
+    zz_ext: float = None
 
     atr: float = None
     _tr_seed: list = field(default_factory=list)
@@ -69,28 +75,51 @@ class TrendEngine:
         else:
             self.atr = (self.atr * (self.atr_len - 1) + tr) / self.atr_len
 
+    def _reversal_threshold(self):
+        """Absolute price distance that counts as a reversal.
+
+        Percent mode is what OTC teaches (a ZigZag set to e.g. 3%). ATR mode
+        exists because one percentage cannot serve a ladder from 5m to 1M --
+        3% is a routine move on a monthly chart and a once-a-year event on a
+        5-minute one -- so it scales the same idea to each timeframe's own
+        volatility.
+        """
+        if self.zz_mode == "pct":
+            base = self.zz_ext if self.zz_ext is not None else self.closes[-1]
+            return abs(base) * self.zz_pct / 100.0
+        if self.atr is None:
+            return None
+        return self.atr * self.zz_atr_mult
+
     def _update_swings(self):
-        """Confirm a pivot only once fractal_n bars have closed after it."""
-        n = self.fractal_n
-        i = len(self.closes) - 1 - n
-        if i < n:
+        """ZigZag pivot detection, matching the tool OTC marks pivots with.
+
+        A pivot is recorded only when price retraces from the running extreme
+        by the reversal threshold, so pivots strictly alternate high/low/high
+        and each one is fixed the moment it is recorded. The still-forming
+        leg's extreme is never published -- that is the part of a ZigZag that
+        repaints, and publishing it would be lookahead.
+        """
+        h, l = self.highs[-1], self.lows[-1]
+        if self.zz_ext is None:
+            self.zz_ext, self.zz_dir = h, 1
             return
-        window_h = self.highs[i - n:i + n + 1]
-        window_l = self.lows[i - n:i + n + 1]
-        cand_h, cand_l = self.highs[i], self.lows[i]
+        thr = self._reversal_threshold()
+        if thr is None or thr <= 0:
+            return
 
-        no_filter = self.min_swing_mult <= 0 or self.atr is None
-        min_leg = 0.0 if no_filter else self.min_swing_mult * self.atr
-
-        last_low = self.swing_lows[-1] if self.swing_lows else None
-        last_high = self.swing_highs[-1] if self.swing_highs else None
-
-        if cand_h == max(window_h) and window_h.count(cand_h) == 1:
-            if no_filter or last_low is None or (cand_h - last_low) >= min_leg:
-                self.swing_highs.append(cand_h)
-        if cand_l == min(window_l) and window_l.count(cand_l) == 1:
-            if no_filter or last_high is None or (last_high - cand_l) >= min_leg:
-                self.swing_lows.append(cand_l)
+        if self.zz_dir > 0:
+            if h > self.zz_ext:
+                self.zz_ext = h
+            elif (self.zz_ext - l) >= thr:
+                self.swing_highs.append(self.zz_ext)
+                self.zz_dir, self.zz_ext = -1, l
+        else:
+            if l < self.zz_ext:
+                self.zz_ext = l
+            elif (h - self.zz_ext) >= thr:
+                self.swing_lows.append(self.zz_ext)
+                self.zz_dir, self.zz_ext = 1, h
 
     def _structure_dir(self):
         """Newest-first sequences of swing highs and lows.

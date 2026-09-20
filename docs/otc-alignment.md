@@ -92,16 +92,66 @@ tested and available. Turning **OTC mode off** gives you the second opinion,
 including a Transition state that flags a trend rolling over, which OTC's
 rule has no concept of.
 
-## Known gaps against OTC's method
+## Pivot detection now matches (with one deliberate deviation)
+
+The engine originally found pivots with an N-bar fractal. It now uses a
+**ZigZag**, the same tool Bernd marks pivots with: a pivot is recorded only
+once price retraces from the running extreme by a reversal threshold, so
+pivots strictly alternate high / low / high / low.
+
+That alternation also fixed a latent correctness problem. With independent
+fractal detection you could record two swing highs with no intervening low,
+which makes "the six most recent pivots, three highs and three lows"
+ill-defined. A ZigZag cannot produce that.
+
+The still-forming leg's extreme is never published. That is precisely the
+part of a ZigZag that repaints, and the no-lookahead replay test covers it.
+
+### The deviation: threshold units
+
+OTC sets the ZigZag to a **percentage** (e.g. 3%). That works when you are
+looking at one chart and tuning it by eye, which is how it is taught. It does
+not survive an eleven-rung ladder. Measured on real bars:
+
+| Threshold | Pivots found in 2,142 five-minute bars | First decisive call |
+|---|---|---|
+| 3.0% | **2** | never |
+| 1.0% | **8** | bar 1,314 |
+| 1.5 × ATR | 367 | bar 90 |
+
+A 3% retrace is an ordinary move on a monthly chart and a rare event on a
+5-minute one, so one percentage cannot serve both. **ATR-scaled is therefore
+the default**: identical reversal logic, with the threshold scaled to each
+timeframe's own volatility. Percentage mode is still available (`Use
+percentage threshold instead of ATR`) for replicating exactly what you see in
+class on a single chart.
+
+Default reversal threshold is **1.5 × ATR**, chosen across four real datasets:
+it holds ~1 state change per 30–35 bars and makes the monthly row decisive
+after ~35 monthly bars, versus 93 at 3 × ATR.
+
+## Behaviour at the final defaults
+
+| Dataset | Up | Down | Sideways | Bars per flip |
+|---|---|---|---|---|
+| Index futures 5-min | 18% | 6% | 76% | 35 |
+| Index futures daily | 33% | 8% | 59% | 30 |
+| NVDA daily | 16% | 12% | 72% | 31 |
+| BTC hourly | 13% | 9% | 78% | 32 |
+
+This reproduces OTC's character — sideways most of the time, trends called
+sparingly — and is roughly twice as steady as the fractal version was.
+
+**The two modes never contradict each other outright.** Across all three
+datasets, the share of bars where one definition says Up while the other says
+Down is **0.0%**. They differ only in how readily they commit to a direction
+(66–68% exact agreement, 73–78% on direction), never in which direction.
+
+## Remaining gaps against OTC's method
 
 Worth being explicit about what still does not match:
 
-1. **Pivot detection differs.** OTC uses a ZigZag with a *percentage* retrace
-   threshold; we use an N-bar fractal with an optional ×ATR minimum swing.
-   These select different pivots on the same chart. The `Min swing size
-   (x ATR)` input is the closest analog to "reduce the percentage," but it is
-   not the same algorithm. If you want tighter alignment, this is the next
-   thing to change.
+1. ~~Pivot detection differs.~~ **Closed** — see "Pivot detection" below.
 2. **"Two consecutive higher lows/highs" is read as AND**, i.e. an uptrend
    needs both the highs and the lows rising. Bernd's sideways example (lower
    high + higher low) supports this reading, but the phrasing in the lesson

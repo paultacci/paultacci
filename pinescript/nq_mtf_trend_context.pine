@@ -8,14 +8,17 @@ grpMode = "Trend Definition"
 otcMode      = input.bool(true, "OTC mode (structure only, as taught in class)", group=grpMode, tooltip="On: direction comes from swing structure alone and anything that isn't a clean sequence is Sideways -- Bernd's rule from the supply & demand course. No Transition state exists in this mode. Off: structure must also agree with a volatility-normalized slope, and disagreement between them shows as Transition.")
 structPivots = input.int(3, "Swing pivots per side", minval=2, maxval=4, group=grpMode, tooltip="3 = the OTC six-pivot rule (three highs and three lows; needs two consecutive higher highs AND higher lows for an uptrend). 2 = looser, calls trends about twice as often.")
 
+grpPivot = "Pivot Detection (ZigZag)"
+zzUsePct    = input.bool(false, "Use percentage threshold instead of ATR", group=grpPivot, tooltip="OTC marks pivots with a ZigZag set to a percentage (e.g. 3%). That works on one chart at a time, but a single percentage cannot serve a ladder from 5m to 1M -- on 5-minute bars a 3% ZigZag finds almost no pivots at all. ATR mode applies the same reversal logic scaled to each timeframe's own volatility.")
+zzPct       = input.float(3.0, "Reversal threshold (%)", minval=0.05, step=0.05, group=grpPivot)
+zzAtrMult   = input.float(1.5, "Reversal threshold (x ATR)", minval=0.1, step=0.1, group=grpPivot)
+
 grpCore = "Core Engine"
-fractalN     = input.int(2, "Swing fractal bars (each side)", minval=1, maxval=10, group=grpCore)
 lenL         = input.int(75, "Regression / efficiency lookback (bars)", minval=5, maxval=500, group=grpCore, tooltip="If a very high timeframe row shows Insufficient, lower this -- a monthly row needs this many monthly bars of history.")
 slopeThresh  = input.float(1.5, "Slope significance (t-stat)", minval=0.1, step=0.1, group=grpCore)
 rangeER      = input.float(0.25, "Range cutoff (efficiency ratio)", minval=0.0, maxval=1.0, step=0.05, group=grpCore, tooltip="When the two direction measures disagree, efficiency below this reads as chop (Sideways) rather than a regime change (Transition). Unused in OTC mode.")
 hystH        = input.int(3, "Hysteresis (bars to confirm a flip)", minval=1, maxval=10, group=grpCore)
 atrLen       = input.int(14, "ATR length", minval=1, group=grpCore)
-minSwingMult = input.float(0.0, "Min swing size (x ATR, 0 = off)", minval=0.0, step=0.1, group=grpCore, tooltip="The ATR-based analog of reducing the ZigZag percentage: ignores swings smaller than this multiple of ATR.")
 volFloorMult = input.float(10.0, "Volatility floor (x min tick)", minval=0.0, group=grpCore)
 waitForClose = input.bool(true, "Higher timeframes: wait for confirmed close (no repaint)", group=grpCore, tooltip="On: a higher-timeframe row only reflects fully closed bars, so it never repaints -- but a monthly row is then a month behind. Turn off to watch the developing bar.")
 
@@ -56,8 +59,6 @@ cInsuf = input.color(color.new(color.gray, 40), "Insufficient data", group=grpCo
 // request.security(). Reading the globals directly keeps the qualifier intact.
 f_calc(_waitForClose) =>
     atrVal = ta.atr(atrLen)
-    ph = ta.pivothigh(fractalN, fractalN)
-    pl = ta.pivotlow(fractalN, fractalN)
 
     var float h1 = na
     var float h2 = na
@@ -67,21 +68,40 @@ f_calc(_waitForClose) =>
     var float l2 = na
     var float l3 = na
     var float l4 = na
-    noFilter = minSwingMult <= 0 or na(atrVal)
-    minLeg = minSwingMult * atrVal
 
-    if not na(ph)
-        if noFilter or na(l1) or (ph - l1) >= minLeg
-            h4 := h3
-            h3 := h2
-            h2 := h1
-            h1 := ph
-    if not na(pl)
-        if noFilter or na(h1) or (h1 - pl) >= minLeg
-            l4 := l3
-            l3 := l2
-            l2 := l1
-            l1 := pl
+    // ZigZag pivot detection, matching the tool OTC marks pivots with. A pivot
+    // is recorded only once price retraces from the running extreme by the
+    // reversal threshold, so pivots strictly alternate high/low and each is
+    // fixed the moment it is recorded. The still-forming leg's extreme is never
+    // published -- that is the part of a ZigZag that repaints.
+    var int zzDir = 0
+    var float zzExt = na
+    thr = zzUsePct ? (na(zzExt) ? close : zzExt) * zzPct / 100.0 : atrVal * zzAtrMult
+
+    if na(zzExt)
+        zzExt := high
+        zzDir := 1
+    else if not na(thr) and thr > 0
+        if zzDir > 0
+            if high > zzExt
+                zzExt := high
+            else if (zzExt - low) >= thr
+                h4 := h3
+                h3 := h2
+                h2 := h1
+                h1 := zzExt
+                zzDir := -1
+                zzExt := low
+        else
+            if low < zzExt
+                zzExt := low
+            else if (high - zzExt) >= thr
+                l4 := l3
+                l3 := l2
+                l2 := l1
+                l1 := zzExt
+                zzDir := 1
+                zzExt := high
 
     // Newest-first. With structPivots = 3 this is the OTC six-pivot rule:
     // two consecutive higher highs AND higher lows make an uptrend.
@@ -224,7 +244,7 @@ f_bucket(er) =>
 f_tip(_code, _er, _t) =>
     s = "State: " + f_stateText(f_view(f_state(_code)))
     s := s + "   (raw, before hysteresis: " + f_stateText(f_raw(_code)) + ")"
-    s := s + "\nStructure: " + f_dirText(f_struct(_code)) + "  [" + str.tostring(structPivots) + " pivots per side]"
+    s := s + "\nStructure: " + f_dirText(f_struct(_code)) + "  [" + str.tostring(structPivots) + " pivots/side, " + (zzUsePct ? str.tostring(zzPct) + "% zigzag" : str.tostring(zzAtrMult) + "x ATR zigzag") + "]"
     s := s + (otcMode ? "\nSlope: not used in OTC mode" : "\nSlope: t-stat " + str.tostring(_t, "#.##") + "  -> " + f_dirText(f_slope(_code)))
     s := s + "\nEfficiency: " + str.tostring(_er, "#.##") + "  (" + f_bucket(_er) + ")"
     s
