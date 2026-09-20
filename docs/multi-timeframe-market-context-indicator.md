@@ -167,10 +167,25 @@ collapsing them into one "Mixed" bucket destroys that information:
 | Up | Up | **Up**, strength = ER bucket |
 | Down | Down | **Down**, strength = ER bucket |
 | No clear sequence | Statistically flat | **Sideways/Range** — both measures independently say "no direction" |
-| Up | Down (or vice versa) | **Transition** — measures directly conflict |
-| Up or Down | Flat | **Transition** — structure still claims a trend the slope no longer supports |
-| No clear sequence | Up or Down | **Transition** — drift without confirming structure |
+| Any disagreement, **ER below range cutoff** | | **Sideways/Range** — the measures conflict, but price is going nowhere: that's chop |
+| Any disagreement, **ER at or above cutoff** | | **Transition** — the measures conflict while price travels decisively: a real regime handover |
 | Insufficient (either) | anything | **Insufficient data** |
+
+The efficiency-ratio gate on the disagreement case (default cutoff `0.25`) is
+**not optional polish — without it the Sideways state is effectively
+unreachable.** Measured on synthetic range data (`reference/validate.py`), a
+quiet range was labelled Sideways only **7%** of the time and Transition
+**64%**, because a regression t-statistic computed over a noisy window almost
+never lands inside a ±1.5 flat band, so "structure flat + slope wobbling" —
+the normal condition inside a range — kept resolving to Transition. Adding the
+gate moved the same data to **71% Sideways / 0% Transition** while leaving a
+clean uptrend's Up share **unchanged at 86%**, confirming the gate filters
+chop without suppressing genuine trends.
+
+This does not violate the separation of strength from direction in §5:
+strength is not choosing a direction here, it is only distinguishing *two
+non-directional states* from one another. Direction is still decided solely by
+the two direction measures.
 
 Sideways is the *agreement* case for "no trend"; Transition is the
 *disagreement* case. Disagreement is treated as information, not noise to be

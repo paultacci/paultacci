@@ -60,11 +60,12 @@ are in `docs/multi-timeframe-market-context-indicator.md`.
 
 | Setting | What it trades off |
 |---|---|
+| Regression/efficiency lookback | **The strongest lever on flicker.** Measured: 20 bars = 87 state changes, 50 = 54, 100 = 47 over the same tape. Higher = steadier but slower to react |
+| Hysteresis | Real but uneven: 1 → 2 cut flips 66→57, 2 → 3 changed nothing, 5 cut them to 40. Use 2, or jump to 5 if it's still noisy |
+| Range cutoff (efficiency) | How much "going nowhere" counts as Sideways rather than Transition when the two direction checks disagree. Raising it makes more chop read as Sideways |
+| Slope significance (t-stat) | Higher = more conservative about declaring a trend; shifts bars from Up/Down into Sideways |
 | Swing fractal bars | Higher = fewer false swings, more lag on Structure |
-| Min swing size (x ATR) | Off by default. First lever to try if colors flicker — ignores swings smaller than this multiple of ATR |
-| Regression/efficiency lookback | Higher = smoother Slope reading, slower to react |
-| Slope significance (t-stat) | Higher = more Sideways/Transition calls, more conservative about declaring a trend |
-| Hysteresis | Higher = fewer color flips, more lag on every state change |
+| Min swing size (x ATR) | Off by default, and **measured impact was negligible** (57 → 54 flips at 1.0×ATR). Try the lookback first |
 | Wait for confirmed close | Off = higher timeframes update live intrabar (faster, can flicker); On = only shows a fully closed higher-timeframe bar (matches backtest exactly, one bar slower) |
 
 Don't change these blind — tune them by watching real NQ price action per

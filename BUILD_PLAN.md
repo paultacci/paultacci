@@ -72,18 +72,14 @@ I wrote this code **without the ability to compile it** — TradingView is not
 reachable from the authoring environment. The following are specific,
 known-uncertain areas. Verify each in the Pine Editor and fix what breaks.
 
-### A1. Type-qualifier propagation through the user-defined function ⚠️ highest risk
+### A1. Type-qualifier propagation — ✅ already designed out
 
-`f_calc()` takes `_fractalN`, `_lenL`, `_atrLen` as parameters and passes them
-to `ta.pivothigh()`, `ta.correlation()`, `ta.atr()`, `math.sum()`, all of
-which require **`simple int`** length arguments. The values originate from
-`input.int()` (simple), but Pine may downgrade them to `series int` when
-passed as function parameters — especially inside `request.security()`.
-
-- **If it errors:** the standard fix is to stop passing them as parameters
-  and read the global inputs directly inside `f_calc()`, since globals retain
-  their `simple` qualifier. That means `f_calc()` takes only `_waitForClose`.
-  Do that rather than fighting the type system.
+`f_calc()` originally took lengths as parameters and passed them to
+`ta.atr()`, `ta.pivothigh()`, `ta.correlation()` and `math.sum()`, which want
+**`simple int`** arguments — Pine can downgrade a value to `series int` across
+a function boundary, especially inside `request.security()`. The function now
+takes only `_waitForClose` and reads the length inputs from globals, which
+keeps the qualifier intact. **Do not "clean this up" by re-parameterising it.**
 
 ### A2. `var` state inside a tuple-returning UDF called from `request.security()`
 
@@ -109,6 +105,16 @@ and ER — tooltips lose detail but the core survives.
   table mutation from inside a user-defined function.
 - `timeframe.in_seconds(tf2)` where `tf2` comes from `input.timeframe()`.
 - `alertcondition(ta.change(chState) != 0, ...)` — `ta.change` on an int series.
+
+### A4b. Keep the Pine script and the Python twin in sync
+
+`reference/mtf_trend.py` is an executable definition of the same engine, and
+`reference/validate.py` tests it (`python3 reference/validate.py`, no
+dependencies, runs in seconds). **Any logic change to the Pine script must be
+mirrored there and the harness re-run** — that harness is what caught the
+Sideways bug described in `docs/validation-report.md`. If you change the state
+machine and only touch the `.pine` file, the two silently diverge and the
+tests start validating a version that no longer ships.
 
 ### A5. Logic review (not syntax)
 
@@ -153,12 +159,14 @@ slope threshold. Record what each change did.
 **Accept:** a short table of setting → flip count → subjective usability.
 
 ### B5. Parameter sensitivity spot-check (spec §6.4)
-Test `L ∈ {20, 50, 100}` × `threshold ∈ {1.0, 1.5, 2.5}` on one volatile and
-one quiet session. Report which combinations change the state timeline
-materially.
-**Accept:** findings written into `PROGRESS.md`; propose new defaults with
-reasoning, but **do not change defaults without the owner's sign-off** — he
-trades this, the call is his.
+Already run on synthetic data — see `docs/validation-report.md` for the grid.
+**Do not redo that work; confirm or refute it on real bars.** Specifically:
+lookback dominated flip rate (20 → 87 flips, 100 → 47), hysteresis 2 → 3
+bought nothing, and the min-swing filter was negligible. Check whether real
+NQ agrees, since synthetic data has no fat tails, gaps, or session effects.
+**Accept:** findings appended to the validation report; propose new defaults
+with reasoning, but **do not change defaults without the owner's sign-off** —
+he trades this, the call is his.
 
 ### B6. Update docs to match reality
 `docs/pinescript-usage.md` still describes the old four-state model and lacks

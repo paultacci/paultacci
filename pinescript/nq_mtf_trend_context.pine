@@ -8,6 +8,7 @@ grpCore = "Core Engine"
 fractalN     = input.int(2, "Swing fractal bars (each side)", minval=1, maxval=10, group=grpCore)
 lenL         = input.int(50, "Regression / efficiency lookback (bars)", minval=5, maxval=500, group=grpCore)
 slopeThresh  = input.float(1.5, "Slope significance (t-stat)", minval=0.1, step=0.1, group=grpCore)
+rangeER      = input.float(0.25, "Range cutoff (efficiency ratio)", minval=0.0, maxval=1.0, step=0.05, group=grpCore, tooltip="When the two direction measures disagree, efficiency below this reads as chop (Sideways) rather than a regime change (Transition).")
 hystH        = input.int(2, "Hysteresis (bars to confirm a flip)", minval=1, maxval=10, group=grpCore)
 atrLen       = input.int(14, "ATR length", minval=1, group=grpCore)
 minSwingMult = input.float(0.0, "Min swing size (x ATR, 0 = off)", minval=0.0, step=0.1, group=grpCore)
@@ -40,17 +41,21 @@ cTrans = input.color(color.new(color.orange, 0), "Transition", group=grpColor)
 cInsuf = input.color(color.new(color.gray, 40), "Insufficient data", group=grpColor)
 
 // ---------- Core engine ----------
-f_calc(_fractalN, _lenL, _thresh, _hystH, _atrLen, _minSwingMult, _volFloorMult, _waitForClose) =>
-    atrVal = ta.atr(_atrLen)
-    ph = ta.pivothigh(_fractalN, _fractalN)
-    pl = ta.pivotlow(_fractalN, _fractalN)
+// Lengths are read from the global inputs rather than passed in as parameters:
+// ta.atr() and several ta.* functions require a `simple int`, and Pine can
+// downgrade a value to `series` when it crosses a function boundary inside
+// request.security(). Reading the globals directly keeps the qualifier intact.
+f_calc(_waitForClose) =>
+    atrVal = ta.atr(atrLen)
+    ph = ta.pivothigh(fractalN, fractalN)
+    pl = ta.pivotlow(fractalN, fractalN)
 
     var float sh1 = na
     var float sh2 = na
     var float sl1 = na
     var float sl2 = na
-    noFilter = _minSwingMult <= 0 or na(atrVal)
-    minLeg = _minSwingMult * atrVal
+    noFilter = minSwingMult <= 0 or na(atrVal)
+    minLeg = minSwingMult * atrVal
 
     if not na(ph)
         if noFilter or na(sl1) or (ph - sl1) >= minLeg
@@ -65,16 +70,16 @@ f_calc(_fractalN, _lenL, _thresh, _hystH, _atrLen, _minSwingMult, _volFloorMult,
     structDir = na(sh1) or na(sh2) or na(sl1) or na(sl2) ? 0 : (sh1 > sh2 and sl1 > sl2 ? 1 : (sh1 < sh2 and sl1 < sl2 ? -1 : 2))
 
     float idx = bar_index
-    r = ta.correlation(close, idx, _lenL)
+    r = ta.correlation(close, idx, lenL)
     denom = 1 - r * r
-    tstat = denom > 0.0001 ? r * math.sqrt(_lenL - 2) / math.sqrt(denom) : (r > 0 ? 999.0 : -999.0)
-    lowVol = atrVal < syminfo.mintick * _volFloorMult
-    slopeBlind = bar_index < _lenL or na(r) or lowVol
+    tstat = denom > 0.0001 ? r * math.sqrt(lenL - 2) / math.sqrt(denom) : (r > 0 ? 999.0 : -999.0)
+    lowVol = atrVal < syminfo.mintick * volFloorMult
+    slopeBlind = bar_index < lenL or na(r) or lowVol
     // 0 = unusable, 1 = up, -1 = down, 2 = statistically flat
-    slopeDir = slopeBlind ? 0 : (tstat > _thresh ? 1 : (tstat < -_thresh ? -1 : 2))
+    slopeDir = slopeBlind ? 0 : (tstat > slopeThresh ? 1 : (tstat < -slopeThresh ? -1 : 2))
 
-    net = math.abs(close - close[_lenL])
-    path = math.sum(math.abs(ta.change(close)), _lenL)
+    net = math.abs(close - close[lenL])
+    path = math.sum(math.abs(ta.change(close)), lenL)
     er = path > 0 ? net / path : 0.0
 
     int rawState = 0
@@ -87,7 +92,11 @@ f_calc(_fractalN, _lenL, _thresh, _hystH, _atrLen, _minSwingMult, _volFloorMult,
     else if structDir == 2 and slopeDir == 2
         rawState := 2
     else
-        rawState := 3
+        // The measures disagree. Efficiency decides what kind of disagreement:
+        // price going nowhere is chop, price travelling decisively is a real
+        // regime handover. Without this, ranges read as permanent Transition,
+        // because a t-stat over a noisy window is almost never flat.
+        rawState := er < rangeER ? 2 : 3
 
     var int confirmedState = 0
     var int pendingState = 0
@@ -100,7 +109,7 @@ f_calc(_fractalN, _lenL, _thresh, _hystH, _atrLen, _minSwingMult, _volFloorMult,
         else
             pendingState := rawState
             pendingCount := 1
-        if pendingCount >= _hystH
+        if pendingCount >= hystH
             confirmedState := pendingState
             pendingCount := 0
     else
@@ -132,12 +141,12 @@ f_calc(_fractalN, _lenL, _thresh, _hystH, _atrLen, _minSwingMult, _volFloorMult,
     [outState, outRaw, outER, outT, outStruct, outSlope]
 
 // Chart timeframe: computed directly, so it carries no extra higher-timeframe delay
-[chState, chRaw, chER, chT, chStruct, chSlope] = f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, false)
+[chState, chRaw, chER, chT, chStruct, chSlope] = f_calc(false)
 
-[s2, r2, e2, t2, sd2, pd2] = request.security(syminfo.tickerid, tf2, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, waitForClose), lookahead=barmerge.lookahead_off)
-[s3, r3, e3, t3, sd3, pd3] = request.security(syminfo.tickerid, tf3, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, waitForClose), lookahead=barmerge.lookahead_off)
-[s4, r4, e4, t4, sd4, pd4] = request.security(syminfo.tickerid, tf4, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, waitForClose), lookahead=barmerge.lookahead_off)
-[s5, r5, e5, t5, sd5, pd5] = request.security(syminfo.tickerid, tf5, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, waitForClose), lookahead=barmerge.lookahead_off)
+[s2, r2, e2, t2, sd2, pd2] = request.security(syminfo.tickerid, tf2, f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[s3, r3, e3, t3, sd3, pd3] = request.security(syminfo.tickerid, tf3, f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[s4, r4, e4, t4, sd4, pd4] = request.security(syminfo.tickerid, tf4, f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[s5, r5, e5, t5, sd5, pd5] = request.security(syminfo.tickerid, tf5, f_calc(waitForClose), lookahead=barmerge.lookahead_off)
 
 // A lower timeframe pulled into a higher-timeframe chart returns only the last
 // value inside each chart bar, which is not a state this engine can stand behind.
