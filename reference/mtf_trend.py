@@ -1,11 +1,31 @@
 """Reference implementation of the multi-timeframe trend-context engine.
 
-Mirrors pinescript/nq_mtf_trend_context.pine bar for bar. Exists so the state
-logic can be tested off-chart and so any future port (NinjaTrader, Python
-backtest) has an executable definition to check against rather than prose.
+Mirrors the per-timeframe engine in pinescript/nq_mtf_trend_context.pine so
+the state logic can be tested off-chart, and so any future port has an
+executable definition to check against rather than prose.
 
 Strictly causal: update() only ever sees bars up to and including the current
 one, which is what makes the replay test in validate.py meaningful.
+
+PARITY WITH THE PINE SCRIPT -- two deliberate differences, verified by audit:
+
+1. `waitForClose` is not modelled here. In Pine it reports the previous bar's
+   values so a higher timeframe pulled through request.security() cannot drift
+   while its bar is still forming. That is a multi-timeframe plumbing concern
+   with no meaning for a single series, so this engine always corresponds to
+   the Pine path with waitForClose = false.
+
+2. The volatility floor differs in units. Pine expresses it as a multiple of
+   syminfo.mintick (default 10x, so 2.5 points on NQ); here `vol_floor` is an
+   absolute price distance and defaults to 0, i.e. off. On any liquid
+   instrument the floor is inert either way -- NQ's ATR is orders of magnitude
+   above 2.5 points -- but the two are not the same knob and should not be
+   compared directly.
+
+Everything else was checked line by line and matches: ZigZag seeding and
+reversal logic, the structure comparison for 2/3/4 pivots per side, the
+correlation t-statistic, the efficiency ratio window, the OTC and enhanced
+composition rules, and the hysteresis counter.
 """
 
 from dataclasses import dataclass, field

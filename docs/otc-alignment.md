@@ -77,8 +77,7 @@ Two reasons beyond simply matching the class:
    second-guessing than it gains in sensitivity.
 2. **It answers sooner on high timeframes**, which matters for the monthly
    and weekly rungs you require. Because it counts pivots rather than filling
-   a regression window, it becomes decisive after ~27 monthly bars (~2.2
-   years) instead of ~77 (~6.4 years):
+   a regression window, it becomes decisive much sooner:
 
    | Mode | Monthly row decisive after |
    |---|---|
