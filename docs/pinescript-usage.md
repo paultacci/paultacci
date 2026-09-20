@@ -13,15 +13,27 @@
 
 - **Chart background/candles** (if enabled): colored by the state of the
   timeframe you're currently viewing.
-  - Green = confirmed uptrend
-  - Red = confirmed downtrend
-  - Orange = mixed/transition (the two direction checks disagree)
-  - Gray = insufficient data yet (not enough history/volatility to call it)
+  - Green = confirmed **uptrend**
+  - Red = confirmed **downtrend**
+  - Blue = **sideways/range** — both direction checks independently say
+    there's no direction. This is the quiet, going-nowhere market.
+  - Orange = **transition** — the two direction checks disagree. Usually a
+    trend aging out or a reversal forming. Different from sideways on
+    purpose: sideways is "nothing happening," transition is "something is
+    changing."
+  - Gray = **insufficient data** (not enough history/volatility to call it)
 - **Table** (top-right by default): one row per configured timeframe —
   current chart timeframe, then up to 4 higher timeframes (defaults: 1H, 4H,
   1D, Weekly off by default). Each row shows the state and a strength label
   (Weak / Moderate / Strong), which tells you how clean the move is,
-  independent of its direction.
+  independent of its direction. The bottom **Align** row counts how many
+  displayed timeframes agree — all-up or all-down means the whole ladder is
+  lined up.
+- **Hover any table cell** for the numbers behind the label: the raw state
+  before hysteresis (shows you a flip is pending), what structure says, the
+  slope t-stat, and the efficiency ratio. Nothing is hidden.
+- If you only ever want three buckets, turn on **Simple mode**, which merges
+  Transition into Sideways for display.
 - **Alert**: fires whenever the chart-timeframe state changes (Up→Down,
   Up→Mixed, etc.) — set it up via TradingView's alert dialog on this
   indicator if you want a notification instead of watching the chart.
@@ -38,18 +50,20 @@ agree before it calls something a trend:
    noisy the market's been (not just "it went up a little")? This reacts
    faster but can wobble more.
 
-If both agree → Up or Down. If they disagree, or either doesn't have enough
-data yet → Mixed or Insufficient — the indicator will not force a directional
-label just to look decisive. Full reasoning and the two candidate methods
-compared are in `docs/multi-timeframe-market-context-indicator.md`.
+If both agree on a direction → Up or Down. If both independently say "no
+direction" → Sideways. If they disagree → Transition. If either doesn't have
+enough data → Insufficient. The indicator will not force a directional label
+just to look decisive. Full reasoning and the two candidate methods compared
+are in `docs/multi-timeframe-market-context-indicator.md`.
 
 ## Key settings you'll likely tune
 
 | Setting | What it trades off |
 |---|---|
 | Swing fractal bars | Higher = fewer false swings, more lag on Structure |
+| Min swing size (x ATR) | Off by default. First lever to try if colors flicker — ignores swings smaller than this multiple of ATR |
 | Regression/efficiency lookback | Higher = smoother Slope reading, slower to react |
-| Slope significance (t-stat) | Higher = fewer Mixed calls from Slope, more conservative |
+| Slope significance (t-stat) | Higher = more Sideways/Transition calls, more conservative about declaring a trend |
 | Hysteresis | Higher = fewer color flips, more lag on every state change |
 | Wait for confirmed close | Off = higher timeframes update live intrabar (faster, can flicker); On = only shows a fully closed higher-timeframe bar (matches backtest exactly, one bar slower) |
 

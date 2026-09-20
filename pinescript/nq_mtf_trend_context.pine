@@ -1,13 +1,16 @@
 //@version=6
 indicator("NQ Multi-Timeframe Trend Context", shorttitle="MTF Trend", overlay=true)
 
+// State codes: 0 = insufficient, 1 = up, -1 = down, 2 = sideways, 3 = transition
+
 // ---------- Inputs ----------
 grpCore = "Core Engine"
 fractalN     = input.int(2, "Swing fractal bars (each side)", minval=1, maxval=10, group=grpCore)
 lenL         = input.int(50, "Regression / efficiency lookback (bars)", minval=5, maxval=500, group=grpCore)
 slopeThresh  = input.float(1.5, "Slope significance (t-stat)", minval=0.1, step=0.1, group=grpCore)
 hystH        = input.int(2, "Hysteresis (bars to confirm a flip)", minval=1, maxval=10, group=grpCore)
-atrLen       = input.int(14, "ATR length (volatility floor)", minval=1, group=grpCore)
+atrLen       = input.int(14, "ATR length", minval=1, group=grpCore)
+minSwingMult = input.float(0.0, "Min swing size (x ATR, 0 = off)", minval=0.0, step=0.1, group=grpCore)
 volFloorMult = input.float(10.0, "Volatility floor (x min tick)", minval=0.0, group=grpCore)
 waitForClose = input.bool(true, "Higher timeframes: wait for confirmed close (no repaint)", group=grpCore)
 
@@ -25,18 +28,20 @@ grpVis = "Visuals"
 showBg      = input.bool(true, "Color chart background by primary trend", group=grpVis)
 showBars    = input.bool(false, "Color candles by primary trend", group=grpVis)
 showTable   = input.bool(true, "Show multi-timeframe table", group=grpVis)
+simpleMode  = input.bool(false, "Simple mode (merge Transition into Sideways)", group=grpVis)
 tablePosStr = input.string("Top Right", "Table position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=grpVis)
 bgOpacity   = input.int(85, "Background transparency", minval=0, maxval=95, group=grpVis)
 
 grpColor = "Colors"
 cUp    = input.color(color.new(color.green, 0), "Up", group=grpColor)
 cDown  = input.color(color.new(color.red, 0), "Down", group=grpColor)
-cMixed = input.color(color.new(color.orange, 0), "Mixed / Transition", group=grpColor)
+cSide  = input.color(color.new(color.blue, 20), "Sideways / range", group=grpColor)
+cTrans = input.color(color.new(color.orange, 0), "Transition", group=grpColor)
 cInsuf = input.color(color.new(color.gray, 40), "Insufficient data", group=grpColor)
 
 // ---------- Core engine ----------
-// State codes: 0 = insufficient, 1 = up, -1 = down, 2 = mixed
-f_calc(_fractalN, _lenL, _thresh, _hystH, _atrLen, _volFloorMult, _waitForClose) =>
+f_calc(_fractalN, _lenL, _thresh, _hystH, _atrLen, _minSwingMult, _volFloorMult, _waitForClose) =>
+    atrVal = ta.atr(_atrLen)
     ph = ta.pivothigh(_fractalN, _fractalN)
     pl = ta.pivotlow(_fractalN, _fractalN)
 
@@ -44,33 +49,51 @@ f_calc(_fractalN, _lenL, _thresh, _hystH, _atrLen, _volFloorMult, _waitForClose)
     var float sh2 = na
     var float sl1 = na
     var float sl2 = na
-    if not na(ph)
-        sh2 := sh1
-        sh1 := ph
-    if not na(pl)
-        sl2 := sl1
-        sl1 := pl
+    noFilter = _minSwingMult <= 0 or na(atrVal)
+    minLeg = _minSwingMult * atrVal
 
+    if not na(ph)
+        if noFilter or na(sl1) or (ph - sl1) >= minLeg
+            sh2 := sh1
+            sh1 := ph
+    if not na(pl)
+        if noFilter or na(sh1) or (sh1 - pl) >= minLeg
+            sl2 := sl1
+            sl1 := pl
+
+    // 0 = not enough swings, 1 = HH+HL, -1 = LH+LL, 2 = no clean sequence
     structDir = na(sh1) or na(sh2) or na(sl1) or na(sl2) ? 0 : (sh1 > sh2 and sl1 > sl2 ? 1 : (sh1 < sh2 and sl1 < sl2 ? -1 : 2))
 
-    idx = float(bar_index)
+    float idx = bar_index
     r = ta.correlation(close, idx, _lenL)
     denom = 1 - r * r
     tstat = denom > 0.0001 ? r * math.sqrt(_lenL - 2) / math.sqrt(denom) : (r > 0 ? 999.0 : -999.0)
-    atrVal = ta.atr(_atrLen)
-    insufficientSlope = bar_index < _lenL or na(r)
     lowVol = atrVal < syminfo.mintick * _volFloorMult
-    slopeDir = insufficientSlope or lowVol ? 0 : (tstat > _thresh ? 1 : (tstat < -_thresh ? -1 : 2))
+    slopeBlind = bar_index < _lenL or na(r) or lowVol
+    // 0 = unusable, 1 = up, -1 = down, 2 = statistically flat
+    slopeDir = slopeBlind ? 0 : (tstat > _thresh ? 1 : (tstat < -_thresh ? -1 : 2))
 
     net = math.abs(close - close[_lenL])
     path = math.sum(math.abs(ta.change(close)), _lenL)
     er = path > 0 ? net / path : 0.0
 
-    rawState = (structDir == 0 or slopeDir == 0) ? 0 : (structDir == slopeDir ? structDir : 2)
+    int rawState = 0
+    if structDir == 0 or slopeDir == 0
+        rawState := 0
+    else if structDir == 1 and slopeDir == 1
+        rawState := 1
+    else if structDir == -1 and slopeDir == -1
+        rawState := -1
+    else if structDir == 2 and slopeDir == 2
+        rawState := 2
+    else
+        rawState := 3
 
     var int confirmedState = 0
     var int pendingState = 0
     var int pendingCount = 0
+    int stateBefore = confirmedState
+
     if rawState != confirmedState
         if rawState == pendingState
             pendingCount := pendingCount + 1
@@ -84,68 +107,115 @@ f_calc(_fractalN, _lenL, _thresh, _hystH, _atrLen, _volFloorMult, _waitForClose)
         pendingState := rawState
         pendingCount := 0
 
-    // Looking one bar further back removes the "currently forming HTF bar"
-    // case when this runs inside request.security() for a higher timeframe --
-    // otherwise the state would flicker intrabar as that bar's close moves.
-    outState = _waitForClose ? confirmedState[1] : confirmedState
-    outRaw   = _waitForClose ? rawState[1] : rawState
-    outER    = _waitForClose ? er[1] : er
+    // Reporting the previous bar's values removes the "currently forming HTF bar"
+    // case when this runs inside request.security() -- otherwise every reading
+    // would drift intrabar as that higher-timeframe bar's close moves around.
+    var int prevRaw = 0
+    var float prevER = 0.0
+    var float prevT = 0.0
+    var int prevStruct = 0
+    var int prevSlope = 0
 
-    [outState, outRaw, outER]
+    outState  = _waitForClose ? stateBefore : confirmedState
+    outRaw    = _waitForClose ? prevRaw : rawState
+    outER     = _waitForClose ? prevER : er
+    outT      = _waitForClose ? prevT : tstat
+    outStruct = _waitForClose ? prevStruct : structDir
+    outSlope  = _waitForClose ? prevSlope : slopeDir
 
-// Chart timeframe: computed directly, no extra lag from the HTF-safety offset
-[chState, chRaw, chER] = f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, volFloorMult, false)
+    prevRaw := rawState
+    prevER := er
+    prevT := tstat
+    prevStruct := structDir
+    prevSlope := slopeDir
 
-// Higher timeframes: always evaluated (cheap), shown only if enabled
-[s2, r2, e2] = request.security(syminfo.tickerid, tf2, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, volFloorMult, waitForClose))
-[s3, r3, e3] = request.security(syminfo.tickerid, tf3, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, volFloorMult, waitForClose))
-[s4, r4, e4] = request.security(syminfo.tickerid, tf4, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, volFloorMult, waitForClose))
-[s5, r5, e5] = request.security(syminfo.tickerid, tf5, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, volFloorMult, waitForClose))
+    [outState, outRaw, outER, outT, outStruct, outSlope]
 
-// ---------- Visuals ----------
+// Chart timeframe: computed directly, so it carries no extra higher-timeframe delay
+[chState, chRaw, chER, chT, chStruct, chSlope] = f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, false)
+
+[s2, r2, e2, t2, sd2, pd2] = request.security(syminfo.tickerid, tf2, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, waitForClose), lookahead=barmerge.lookahead_off)
+[s3, r3, e3, t3, sd3, pd3] = request.security(syminfo.tickerid, tf3, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, waitForClose), lookahead=barmerge.lookahead_off)
+[s4, r4, e4, t4, sd4, pd4] = request.security(syminfo.tickerid, tf4, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, waitForClose), lookahead=barmerge.lookahead_off)
+[s5, r5, e5, t5, sd5, pd5] = request.security(syminfo.tickerid, tf5, f_calc(fractalN, lenL, slopeThresh, hystH, atrLen, minSwingMult, volFloorMult, waitForClose), lookahead=barmerge.lookahead_off)
+
+// A lower timeframe pulled into a higher-timeframe chart returns only the last
+// value inside each chart bar, which is not a state this engine can stand behind.
+chartSec = timeframe.in_seconds(timeframe.period)
+ok2 = useTF2 and timeframe.in_seconds(tf2) >= chartSec
+ok3 = useTF3 and timeframe.in_seconds(tf3) >= chartSec
+ok4 = useTF4 and timeframe.in_seconds(tf4) >= chartSec
+ok5 = useTF5 and timeframe.in_seconds(tf5) >= chartSec
+
+// ---------- Display helpers ----------
+f_view(s) =>
+    simpleMode and s == 3 ? 2 : s
+
 f_stateText(s) =>
-    s == 1 ? "Up" : s == -1 ? "Down" : s == 2 ? "Mixed" : "Insufficient"
+    s == 1 ? "Up" : s == -1 ? "Down" : s == 2 ? "Sideways" : s == 3 ? "Transition" : "Insufficient"
 
 f_stateColor(s) =>
-    s == 1 ? cUp : s == -1 ? cDown : s == 2 ? cMixed : cInsuf
+    s == 1 ? cUp : s == -1 ? cDown : s == 2 ? cSide : s == 3 ? cTrans : cInsuf
+
+f_dirText(d) =>
+    d == 1 ? "Up" : d == -1 ? "Down" : d == 2 ? "No clear direction" : "Not enough data"
 
 f_bucket(er) =>
     er < 0.3 ? "Weak" : er < 0.6 ? "Moderate" : "Strong"
 
-bgcolor(showBg ? color.new(f_stateColor(chState), bgOpacity) : na)
-barcolor(showBars ? f_stateColor(chState) : na)
+f_tfLabel(_tf) =>
+    _tf == "1" ? "1m" : _tf == "3" ? "3m" : _tf == "5" ? "5m" : _tf == "15" ? "15m" : _tf == "30" ? "30m" : _tf == "60" ? "1H" : _tf == "120" ? "2H" : _tf == "240" ? "4H" : _tf == "D" ? "1D" : _tf == "W" ? "1W" : _tf == "M" ? "1M" : _tf
+
+f_tip(_state, _raw, _er, _t, _sd, _pd) =>
+    s = "State: " + f_stateText(_state)
+    s := s + "   (raw, before hysteresis: " + f_stateText(_raw) + ")"
+    s := s + "\nStructure: " + f_dirText(_sd)
+    s := s + "\nSlope: t-stat " + str.tostring(_t, "#.##") + "  -> " + f_dirText(_pd)
+    s := s + "\nEfficiency: " + str.tostring(_er, "#.##") + "  (" + f_bucket(_er) + ")"
+    s
+
+// ---------- Visuals ----------
+chView = f_view(chState)
+bgcolor(showBg ? color.new(f_stateColor(chView), bgOpacity) : na)
+barcolor(showBars ? f_stateColor(chView) : na)
 
 tablePos = tablePosStr == "Top Right" ? position.top_right : tablePosStr == "Top Left" ? position.top_left : tablePosStr == "Bottom Right" ? position.bottom_right : position.bottom_left
 
-var table t = table.new(tablePos, 3, 6, border_width=1)
+var table t = table.new(tablePos, 3, 7, border_width=1)
+
+f_row(_t, _row, _label, _state, _raw, _er, _tstat, _sd, _pd) =>
+    v = f_view(_state)
+    tip = f_tip(v, _raw, _er, _tstat, _sd, _pd)
+    table.cell(_t, 0, _row, _label, text_color=chart.fg_color, text_size=size.small, tooltip=tip)
+    table.cell(_t, 1, _row, f_stateText(v), bgcolor=f_stateColor(v), text_color=color.white, text_size=size.small, tooltip=tip)
+    table.cell(_t, 2, _row, v == 0 ? "-" : f_bucket(_er), text_color=chart.fg_color, text_size=size.small, tooltip=tip)
+
 if showTable and barstate.islast
-    table.cell(t, 0, 0, "Timeframe", bgcolor=color.new(color.gray, 70), text_color=color.white)
-    table.cell(t, 1, 0, "State", bgcolor=color.new(color.gray, 70), text_color=color.white)
-    table.cell(t, 2, 0, "Strength", bgcolor=color.new(color.gray, 70), text_color=color.white)
+    hdr = color.new(chart.fg_color, 80)
+    table.cell(t, 0, 0, "TF", bgcolor=hdr, text_color=chart.fg_color, text_size=size.small)
+    table.cell(t, 1, 0, "State", bgcolor=hdr, text_color=chart.fg_color, text_size=size.small)
+    table.cell(t, 2, 0, "Strength", bgcolor=hdr, text_color=chart.fg_color, text_size=size.small)
 
-    table.cell(t, 0, 1, timeframe.period, text_color=color.white)
-    table.cell(t, 1, 1, f_stateText(chState), bgcolor=f_stateColor(chState), text_color=color.white)
-    table.cell(t, 2, 1, chState == 0 ? "—" : f_bucket(chER), text_color=color.white)
+    f_row(t, 1, f_tfLabel(timeframe.period), chState, chRaw, chER, chT, chStruct, chSlope)
+    if ok2
+        f_row(t, 2, f_tfLabel(tf2), s2, r2, e2, t2, sd2, pd2)
+    if ok3
+        f_row(t, 3, f_tfLabel(tf3), s3, r3, e3, t3, sd3, pd3)
+    if ok4
+        f_row(t, 4, f_tfLabel(tf4), s4, r4, e4, t4, sd4, pd4)
+    if ok5
+        f_row(t, 5, f_tfLabel(tf5), s5, r5, e5, t5, sd5, pd5)
 
-    if useTF2
-        table.cell(t, 0, 2, tf2, text_color=color.white)
-        table.cell(t, 1, 2, f_stateText(s2), bgcolor=f_stateColor(s2), text_color=color.white)
-        table.cell(t, 2, 2, s2 == 0 ? "—" : f_bucket(e2), text_color=color.white)
-
-    if useTF3
-        table.cell(t, 0, 3, tf3, text_color=color.white)
-        table.cell(t, 1, 3, f_stateText(s3), bgcolor=f_stateColor(s3), text_color=color.white)
-        table.cell(t, 2, 3, s3 == 0 ? "—" : f_bucket(e3), text_color=color.white)
-
-    if useTF4
-        table.cell(t, 0, 4, tf4, text_color=color.white)
-        table.cell(t, 1, 4, f_stateText(s4), bgcolor=f_stateColor(s4), text_color=color.white)
-        table.cell(t, 2, 4, s4 == 0 ? "—" : f_bucket(e4), text_color=color.white)
-
-    if useTF5
-        table.cell(t, 0, 5, tf5, text_color=color.white)
-        table.cell(t, 1, 5, f_stateText(s5), bgcolor=f_stateColor(s5), text_color=color.white)
-        table.cell(t, 2, 5, s5 == 0 ? "—" : f_bucket(e5), text_color=color.white)
+    ups = (chState == 1 ? 1 : 0) + (ok2 and s2 == 1 ? 1 : 0) + (ok3 and s3 == 1 ? 1 : 0) + (ok4 and s4 == 1 ? 1 : 0) + (ok5 and s5 == 1 ? 1 : 0)
+    downs = (chState == -1 ? 1 : 0) + (ok2 and s2 == -1 ? 1 : 0) + (ok3 and s3 == -1 ? 1 : 0) + (ok4 and s4 == -1 ? 1 : 0) + (ok5 and s5 == -1 ? 1 : 0)
+    shown = 1 + (ok2 ? 1 : 0) + (ok3 ? 1 : 0) + (ok4 ? 1 : 0) + (ok5 ? 1 : 0)
+    others = shown - ups - downs
+    alignTxt = str.tostring(ups) + " up / " + str.tostring(downs) + " down / " + str.tostring(others) + " other"
+    alignCol = ups == shown ? cUp : downs == shown ? cDown : color.new(chart.fg_color, 80)
+    alignTip = "How many of the displayed timeframes agree. All-up or all-down means the whole ladder is aligned; a split means higher and lower timeframes disagree."
+    table.cell(t, 0, 6, "Align", text_color=chart.fg_color, text_size=size.small, tooltip=alignTip)
+    table.cell(t, 1, 6, alignTxt, bgcolor=alignCol, text_color=ups == shown or downs == shown ? color.white : chart.fg_color, text_size=size.small, tooltip=alignTip)
+    table.cell(t, 2, 6, "", text_size=size.small)
 
 // ---------- Alerts ----------
 alertcondition(ta.change(chState) != 0, title="Trend state changed (chart TF)", message="{{ticker}} trend state changed on {{interval}}")

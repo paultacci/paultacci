@@ -155,20 +155,30 @@ its total travel distance in a straight line").
 
 ### 6.1 Composite state
 
-Per timeframe, combine structure direction, slope direction, and ER:
+Per timeframe, combine structure direction, slope direction, and ER. Note
+that the non-directional case splits into **two distinct states** — this is a
+deliberate revision to the original four-state design, because "the market is
+quiet and going nowhere" and "the two measures are actively fighting each
+other" are different conditions that call for different responses, and
+collapsing them into one "Mixed" bucket destroys that information:
 
 | Structure | Slope | Resulting state |
 |---|---|---|
 | Up | Up | **Up**, strength = ER bucket |
 | Down | Down | **Down**, strength = ER bucket |
-| Up | Down (or vice versa) | **Mixed/Transition** (measures disagree) |
-| Mixed | anything | **Mixed/Transition** |
-| anything | Mixed | **Mixed/Transition** |
+| No clear sequence | Statistically flat | **Sideways/Range** — both measures independently say "no direction" |
+| Up | Down (or vice versa) | **Transition** — measures directly conflict |
+| Up or Down | Flat | **Transition** — structure still claims a trend the slope no longer supports |
+| No clear sequence | Up or Down | **Transition** — drift without confirming structure |
 | Insufficient (either) | anything | **Insufficient data** |
 
-Disagreement is treated as information, not noise to be argued away — it
-usually means a trend is aging or a reversal may be forming, which is exactly
-when a "confident" single-number indicator is most misleading.
+Sideways is the *agreement* case for "no trend"; Transition is the
+*disagreement* case. Disagreement is treated as information, not noise to be
+argued away — it usually means a trend is aging or a reversal may be forming,
+which is exactly when a "confident" single-number indicator is most
+misleading. A consumer that genuinely only wants three buckets can merge
+Transition into Sideways at the display layer, but the engine must not
+discard the distinction upstream.
 
 ### 6.2 Label stability (avoiding flapping)
 
