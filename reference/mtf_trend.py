@@ -36,14 +36,19 @@ class TrendEngine:
     vol_floor: float = 0.0
     range_er: float = 0.25
 
+    # 2 = compare the last two swing highs and lows (one comparison per side).
+    # 3 = the OTC "six-pivot rule" (Bernd, supply & demand course lesson 10):
+    #     three highs and three lows, requiring two consecutive higher highs
+    #     AND higher lows for an uptrend. Stricter; anything else is sideways.
+    structure_pivots: int = 3
+    otc_mode: bool = True  # structure alone decides direction, as taught
+
     highs: list = field(default_factory=list)
     lows: list = field(default_factory=list)
     closes: list = field(default_factory=list)
 
-    sh1: float = None
-    sh2: float = None
-    sl1: float = None
-    sl2: float = None
+    swing_highs: list = field(default_factory=list)
+    swing_lows: list = field(default_factory=list)
 
     atr: float = None
     _tr_seed: list = field(default_factory=list)
@@ -77,19 +82,36 @@ class TrendEngine:
         no_filter = self.min_swing_mult <= 0 or self.atr is None
         min_leg = 0.0 if no_filter else self.min_swing_mult * self.atr
 
+        last_low = self.swing_lows[-1] if self.swing_lows else None
+        last_high = self.swing_highs[-1] if self.swing_highs else None
+
         if cand_h == max(window_h) and window_h.count(cand_h) == 1:
-            if no_filter or self.sl1 is None or (cand_h - self.sl1) >= min_leg:
-                self.sh2, self.sh1 = self.sh1, cand_h
+            if no_filter or last_low is None or (cand_h - last_low) >= min_leg:
+                self.swing_highs.append(cand_h)
         if cand_l == min(window_l) and window_l.count(cand_l) == 1:
-            if no_filter or self.sh1 is None or (self.sh1 - cand_l) >= min_leg:
-                self.sl2, self.sl1 = self.sl1, cand_l
+            if no_filter or last_high is None or (last_high - cand_l) >= min_leg:
+                self.swing_lows.append(cand_l)
 
     def _structure_dir(self):
-        if None in (self.sh1, self.sh2, self.sl1, self.sl2):
+        """Newest-first sequences of swing highs and lows.
+
+        With structure_pivots=3 this is the OTC six-pivot rule: an uptrend
+        needs two consecutive higher highs AND two consecutive higher lows.
+        Bernd's worked example -- a lower high with a higher low -- lands in
+        the residual case, which he calls sideways outright.
+        """
+        k = self.structure_pivots
+        if len(self.swing_highs) < k or len(self.swing_lows) < k:
             return DIR_NONE
-        if self.sh1 > self.sh2 and self.sl1 > self.sl2:
+        hs = self.swing_highs[-k:][::-1]
+        ls = self.swing_lows[-k:][::-1]
+        rising = all(hs[i] > hs[i + 1] for i in range(k - 1)) and \
+                 all(ls[i] > ls[i + 1] for i in range(k - 1))
+        falling = all(hs[i] < hs[i + 1] for i in range(k - 1)) and \
+                  all(ls[i] < ls[i + 1] for i in range(k - 1))
+        if rising:
             return DIR_UP
-        if self.sh1 < self.sh2 and self.sl1 < self.sl2:
+        if falling:
             return DIR_DOWN
         return DIR_FLAT
 
@@ -128,6 +150,12 @@ class TrendEngine:
         return net / path if path > 0 else 0.0
 
     def _compose(self, struct_dir, slope_dir, er):
+        if self.otc_mode:
+            # As taught: structure alone decides, and the residual is sideways.
+            # No slope vote, so no Transition state exists in this mode.
+            if struct_dir == DIR_NONE:
+                return INSUFFICIENT
+            return {DIR_UP: UP, DIR_DOWN: DOWN}.get(struct_dir, SIDEWAYS)
         if struct_dir == DIR_NONE or slope_dir == DIR_NONE:
             return INSUFFICIENT
         if struct_dir == DIR_UP and slope_dir == DIR_UP:

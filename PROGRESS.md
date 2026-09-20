@@ -29,6 +29,9 @@ truth for "is this getting done."
 | 14 | **Compile-check on TradingView** | ⬜ Not started | | **Blocking.** Syntax is now statically verified; type-qualifier and runtime behavior still need the real compiler |
 | 15 | Verify non-repaint behavior on chart | ⬜ Not started | | BUILD_PLAN B2 |
 | 16 | Confirm settings feel right on real NQ | ⬜ Not started | | Defaults are evidence-based but not NQ-specific |
+| 17 | Validate trend definition vs. OTC corpus | ✅ Done | 2026-09-20 | `docs/otc-alignment.md` — they disagreed on ~1 bar in 3; OTC's rule is now the default |
+| 18 | Expand to the full 11-timeframe ladder | ✅ Done | 2026-09-20 | 5m→1M, all required rungs present; outputs packed to stay within Pine's request budget |
+| 19 | Validate the ladder on resampled real data | ✅ Done | 2026-09-20 | `reference/validate_mtf.py` |
 
 ## Review findings from step 5 (v1 → v2)
 
@@ -62,6 +65,16 @@ truth for "is this getting done."
 | 16 | Real feeds contain garbage: the BTC set uses `1.7e308` as a missing-data sentinel and crashed the engine with `OverflowError` | Robustness | ✅ Engine carries the last good bar forward on any non-finite print (same as a halt, spec §9) |
 | 17 | The synthetic reversal test asserted Transition specifically; real data shows reversals legitimately bridge via Sideways ~85% of the time | Bad test | ✅ Test now asserts the real invariant (Up and Down never adjacent — holds on 100% of real bars) plus an anti-regression check that Transition stays reachable |
 | 18 | Measurement bug: the zigzag grading key initialized `direction = 0`, letting the extreme track price both ways, so it found zero turning points and delay silently reported `nan` | Bad test | ✅ Rewritten; delay is now measured |
+
+## Findings from step 17-19 (OTC alignment + full ladder)
+
+| # | Finding | Severity | Resolution |
+|---|---|---|---|
+| 19 | **Our trend definition did not match OTC's.** Bernd's six-pivot rule (3 highs, 3 lows, anything else = sideways) calls sideways ~80% of the time; ours said ~55%. Exact agreement 59-66% on real data | **Methodology mismatch** | ✅ OTC rule implemented and made the default; enhanced version kept as a toggle |
+| 20 | OTC's rule answers high timeframes much sooner — it counts pivots instead of filling a lookback window (~27 monthly bars vs ~77) | Practical | ✅ Directly benefits the required 1W/1M rungs |
+| 21 | Pine's `request.*` budget would be strained by 11 timeframes × 6 outputs | Scaling | ✅ Four state ints packed into one float; 3 series per timeframe |
+| 22 | Two tests encoded assumptions from the pre-OTC default (Transition must exist; direction must wait for the lookback). Both are false in OTC mode *by design* | Bad test | ✅ Tests now name the mode they exercise and assert per-mode guarantees |
+| 23 | Pivot detection still differs from OTC's (N-bar fractal vs. percentage ZigZag) | **Open gap** | ⬜ Documented in `docs/otc-alignment.md` as the next alignment step |
 
 ## Known unverified risk
 

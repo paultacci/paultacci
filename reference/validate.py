@@ -79,7 +79,7 @@ def test_regimes():
     ]
     ok = True
     for name, closes, expect in cases:
-        res = run(make_bars(closes), lookback=50)
+        res = run(make_bars(closes), lookback=50, otc_mode=False, structure_pivots=2)
         got = dominant(res, 120, len(res))
         share = pct(res, expect, 120, len(res))
         good = got == expect
@@ -101,7 +101,7 @@ def test_reversal_is_never_a_direct_flip():
     print("\n=== 2. Up and Down are never adjacent states ===")
     up = path_trend(300, +0.40, seed=21)
     down = path_trend(300, -0.40, start=up[-1], seed=22)
-    res = run(make_bars(up + down), lookback=50)
+    res = run(make_bars(up + down), lookback=50, otc_mode=False, structure_pivots=2)
     states = [r["state"] for r in res]
     direct = sum(1 for a, b in zip(states, states[1:]) if {a, b} == {UP, DOWN})
     bridged = any(s in (SIDEWAYS, TRANSITION) for s in states[280:420])
@@ -118,11 +118,13 @@ def test_transition_stays_reachable():
     would swallow Transition entirely and we'd have swapped one unreachable
     state for another.
     """
-    print("\n=== 2b. Transition is still reachable (anti-regression) ===")
+    print("\n=== 2b. Transition is still reachable in enhanced mode ===")
     closes = path_trend(200, +0.40, seed=61)
     closes += path_trend(200, -0.40, start=closes[-1], seed=62)
     closes += path_trend(200, +0.40, start=closes[-1], seed=63)
-    res = run(make_bars(closes), lookback=50)
+    # OTC mode has no Transition state by design, so this only applies to the
+    # enhanced definition where the slope measure can disagree with structure.
+    res = run(make_bars(closes), lookback=50, otc_mode=False, structure_pivots=2)
     share = pct(res, TRANSITION, 70, len(res))
     good = share > 1.0
     print(f"  {'PASS' if good else 'FAIL'}  Transition on {share:.1f}% of bars "
@@ -131,13 +133,37 @@ def test_transition_stays_reachable():
 
 
 def test_insufficient_first():
+    """Neither mode may claim a direction before it has its own inputs.
+
+    The two modes need different things -- enhanced needs a full regression
+    lookback, OTC needs six confirmed pivots -- so the guarantee is stated per
+    mode rather than as a fixed bar count.
+    """
     print("\n=== 3. Cold start reports Insufficient, never a guess (spec 6.5) ===")
-    res = run(make_bars(path_trend(120, +0.4, seed=31)), lookback=50)
-    early = [r["state"] for r in res[:50]]
+    bars = make_bars(path_trend(200, +0.4, seed=31))
+    ok = True
+
+    enhanced = run(bars, lookback=50, otc_mode=False, structure_pivots=2)
+    early = [r["state"] for r in enhanced[:50]]
     good = all(s == INSUFFICIENT for s in early)
-    print(f"  {'PASS' if good else 'FAIL'}  first 50 bars all Insufficient "
+    ok &= good
+    print(f"  {'PASS' if good else 'FAIL'}  enhanced: first 50 bars Insufficient "
           f"(saw: {sorted({STATE_NAMES[s] for s in early})})")
-    return good
+
+    otc = run(bars, lookback=50, otc_mode=True, structure_pivots=3)
+    eng = TrendEngine(lookback=50, otc_mode=True, structure_pivots=3)
+    first_decisive = None
+    for i, (h, l, c) in enumerate(bars):
+        r = eng.update(h, l, c)
+        if r["state"] != INSUFFICIENT:
+            first_decisive = i
+            break
+    # By that bar the six pivots it relies on must actually exist.
+    good = first_decisive is not None and len(eng.swing_highs) >= 3 and len(eng.swing_lows) >= 3
+    ok &= good
+    print(f"  {'PASS' if good else 'FAIL'}  OTC: first call at bar {first_decisive}, "
+          f"backed by {len(eng.swing_highs)} highs / {len(eng.swing_lows)} lows")
+    return ok
 
 
 def test_no_lookahead():
@@ -145,11 +171,11 @@ def test_no_lookahead():
     closes = path_trend(150, +0.3, seed=41)
     closes += path_range(150, seed=42, start=closes[-1])
     bars = make_bars(closes)
-    batch = run(bars, lookback=50)
+    batch = run(bars, lookback=50, otc_mode=False, structure_pivots=2)
 
     mismatches = 0
     for t in range(60, len(bars), 7):  # sample; full sweep is O(n^2)
-        prefix = run(bars[:t + 1], lookback=50)[-1]
+        prefix = run(bars[:t + 1], lookback=50, otc_mode=False, structure_pivots=2)[-1]
         if prefix["state"] != batch[t]["state"] or prefix["raw"] != batch[t]["raw"]:
             mismatches += 1
     good = mismatches == 0

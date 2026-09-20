@@ -9,6 +9,19 @@
 5. If TradingView reports a compile error, send it to me exactly as shown —
    that's the first checkpoint in `PROGRESS.md` (step 5).
 
+## Which trend definition is it using?
+
+By default, **OTC mode is on**: direction comes from the six-pivot rule taught
+in Bernd's supply & demand course (three highs, three lows; two consecutive
+higher highs AND higher lows = uptrend; anything else = sideways). This is
+deliberate so the indicator agrees with your class rather than contradicting
+it — see `docs/otc-alignment.md` for the measured comparison.
+
+Turn **OTC mode off** for the enhanced definition: structure must also agree
+with a volatility-normalized slope, and when they disagree you get a
+**Transition** state flagging a trend rolling over — something the OTC rule
+has no concept of. It calls trends about twice as often.
+
 ## Reading it
 
 - **Chart background/candles** (if enabled): colored by the state of the
@@ -22,9 +35,12 @@
     purpose: sideways is "nothing happening," transition is "something is
     changing."
   - Gray = **insufficient data** (not enough history/volatility to call it)
-- **Table** (top-right by default): one row per configured timeframe —
-  current chart timeframe, then up to 4 higher timeframes (defaults: 1H, 4H,
-  1D, Weekly off by default). Each row shows the state and a strength label
+- **Table** (top-right by default): one row per enabled timeframe. The full
+  ladder is 5m, 15m, 30m, 1H, 90m, 4H, 6H, 1D, 2D, 1W, 1M; enabled by default
+  are 30m, 1H, 90m, 4H, 6H, 1D, 1W, 1M (5m, 15m and 2D are off to keep the
+  table readable — turn them on in settings). Rows below your chart's own
+  timeframe are hidden automatically, because a lower timeframe pulled into a
+  higher-timeframe chart returns values this engine can't stand behind. Each row shows the state and a strength label
   (Weak / Moderate / Strong), which tells you how clean the move is,
   independent of its direction. The bottom **Align** row counts how many
   displayed timeframes agree — all-up or all-down means the whole ladder is
@@ -78,6 +94,13 @@ are in `docs/multi-timeframe-market-context-indicator.md`.
 Both were picked by measuring across four real datasets (index futures 5-min
 and daily, NVDA daily, BTC hourly) rather than tuned to one chart. See
 `docs/validation-report.md` for the numbers.
+
+### If the monthly or weekly row says "Insufficient"
+
+That's the honest answer, not a bug: a timeframe can't report until it has
+enough of its own bars. In OTC mode the monthly row needs ~27 monthly bars
+(~2.2 years); with OTC mode off and lookback 75, it needs ~77 (~6.4 years).
+If it won't populate, either leave OTC mode on or lower the lookback.
 
 Don't change these blind — tune them by watching real NQ price action per
 `docs/project-plan.md`, and update `PROGRESS.md` when you do.

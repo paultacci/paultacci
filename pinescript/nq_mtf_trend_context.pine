@@ -4,26 +4,34 @@ indicator("NQ Multi-Timeframe Trend Context", shorttitle="MTF Trend", overlay=tr
 // State codes: 0 = insufficient, 1 = up, -1 = down, 2 = sideways, 3 = transition
 
 // ---------- Inputs ----------
+grpMode = "Trend Definition"
+otcMode      = input.bool(true, "OTC mode (structure only, as taught in class)", group=grpMode, tooltip="On: direction comes from swing structure alone and anything that isn't a clean sequence is Sideways -- Bernd's rule from the supply & demand course. No Transition state exists in this mode. Off: structure must also agree with a volatility-normalized slope, and disagreement between them shows as Transition.")
+structPivots = input.int(3, "Swing pivots per side", minval=2, maxval=4, group=grpMode, tooltip="3 = the OTC six-pivot rule (three highs and three lows; needs two consecutive higher highs AND higher lows for an uptrend). 2 = looser, calls trends about twice as often.")
+
 grpCore = "Core Engine"
 fractalN     = input.int(2, "Swing fractal bars (each side)", minval=1, maxval=10, group=grpCore)
-lenL         = input.int(75, "Regression / efficiency lookback (bars)", minval=5, maxval=500, group=grpCore)
+lenL         = input.int(75, "Regression / efficiency lookback (bars)", minval=5, maxval=500, group=grpCore, tooltip="If a very high timeframe row shows Insufficient, lower this -- a monthly row needs this many monthly bars of history.")
 slopeThresh  = input.float(1.5, "Slope significance (t-stat)", minval=0.1, step=0.1, group=grpCore)
-rangeER      = input.float(0.25, "Range cutoff (efficiency ratio)", minval=0.0, maxval=1.0, step=0.05, group=grpCore, tooltip="When the two direction measures disagree, efficiency below this reads as chop (Sideways) rather than a regime change (Transition).")
+rangeER      = input.float(0.25, "Range cutoff (efficiency ratio)", minval=0.0, maxval=1.0, step=0.05, group=grpCore, tooltip="When the two direction measures disagree, efficiency below this reads as chop (Sideways) rather than a regime change (Transition). Unused in OTC mode.")
 hystH        = input.int(3, "Hysteresis (bars to confirm a flip)", minval=1, maxval=10, group=grpCore)
 atrLen       = input.int(14, "ATR length", minval=1, group=grpCore)
-minSwingMult = input.float(0.0, "Min swing size (x ATR, 0 = off)", minval=0.0, step=0.1, group=grpCore)
+minSwingMult = input.float(0.0, "Min swing size (x ATR, 0 = off)", minval=0.0, step=0.1, group=grpCore, tooltip="The ATR-based analog of reducing the ZigZag percentage: ignores swings smaller than this multiple of ATR.")
 volFloorMult = input.float(10.0, "Volatility floor (x min tick)", minval=0.0, group=grpCore)
-waitForClose = input.bool(true, "Higher timeframes: wait for confirmed close (no repaint)", group=grpCore)
+waitForClose = input.bool(true, "Higher timeframes: wait for confirmed close (no repaint)", group=grpCore, tooltip="On: a higher-timeframe row only reflects fully closed bars, so it never repaints -- but a monthly row is then a month behind. Turn off to watch the developing bar.")
 
 grpTF = "Timeframes"
-useTF2 = input.bool(true, "Enable", inline="tf2", group=grpTF)
-tf2    = input.timeframe("60", "Timeframe 2", inline="tf2", group=grpTF)
-useTF3 = input.bool(true, "Enable", inline="tf3", group=grpTF)
-tf3    = input.timeframe("240", "Timeframe 3", inline="tf3", group=grpTF)
-useTF4 = input.bool(true, "Enable", inline="tf4", group=grpTF)
-tf4    = input.timeframe("D", "Timeframe 4", inline="tf4", group=grpTF)
-useTF5 = input.bool(false, "Enable", inline="tf5", group=grpTF)
-tf5    = input.timeframe("W", "Timeframe 5", inline="tf5", group=grpTF)
+use1  = input.bool(false, "5m",  inline="a", group=grpTF)
+use2  = input.bool(false, "15m", inline="a", group=grpTF)
+use3  = input.bool(true,  "30m", inline="a", group=grpTF)
+use4  = input.bool(true,  "1H",  inline="a", group=grpTF)
+use5  = input.bool(true,  "90m", inline="b", group=grpTF)
+use6  = input.bool(true,  "4H",  inline="b", group=grpTF)
+use7  = input.bool(true,  "6H",  inline="b", group=grpTF)
+use8  = input.bool(true,  "1D",  inline="c", group=grpTF)
+use9  = input.bool(false, "2D",  inline="c", group=grpTF)
+use10 = input.bool(true,  "1W",  inline="c", group=grpTF)
+use11 = input.bool(true,  "1M",  inline="c", group=grpTF)
+showChartTF = input.bool(true, "Also show the chart's own timeframe", group=grpTF)
 
 grpVis = "Visuals"
 showBg      = input.bool(true, "Color chart background by primary trend", group=grpVis)
@@ -31,6 +39,7 @@ showBars    = input.bool(false, "Color candles by primary trend", group=grpVis)
 showTable   = input.bool(true, "Show multi-timeframe table", group=grpVis)
 simpleMode  = input.bool(false, "Simple mode (merge Transition into Sideways)", group=grpVis)
 tablePosStr = input.string("Top Right", "Table position", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=grpVis)
+tableSize   = input.string("Small", "Table text size", options=["Tiny", "Small", "Normal"], group=grpVis)
 bgOpacity   = input.int(85, "Background transparency", minval=0, maxval=95, group=grpVis)
 
 grpColor = "Colors"
@@ -50,24 +59,37 @@ f_calc(_waitForClose) =>
     ph = ta.pivothigh(fractalN, fractalN)
     pl = ta.pivotlow(fractalN, fractalN)
 
-    var float sh1 = na
-    var float sh2 = na
-    var float sl1 = na
-    var float sl2 = na
+    var float h1 = na
+    var float h2 = na
+    var float h3 = na
+    var float h4 = na
+    var float l1 = na
+    var float l2 = na
+    var float l3 = na
+    var float l4 = na
     noFilter = minSwingMult <= 0 or na(atrVal)
     minLeg = minSwingMult * atrVal
 
     if not na(ph)
-        if noFilter or na(sl1) or (ph - sl1) >= minLeg
-            sh2 := sh1
-            sh1 := ph
+        if noFilter or na(l1) or (ph - l1) >= minLeg
+            h4 := h3
+            h3 := h2
+            h2 := h1
+            h1 := ph
     if not na(pl)
-        if noFilter or na(sh1) or (sh1 - pl) >= minLeg
-            sl2 := sl1
-            sl1 := pl
+        if noFilter or na(h1) or (h1 - pl) >= minLeg
+            l4 := l3
+            l3 := l2
+            l2 := l1
+            l1 := pl
 
-    // 0 = not enough swings, 1 = HH+HL, -1 = LH+LL, 2 = no clean sequence
-    structDir = na(sh1) or na(sh2) or na(sl1) or na(sl2) ? 0 : (sh1 > sh2 and sl1 > sl2 ? 1 : (sh1 < sh2 and sl1 < sl2 ? -1 : 2))
+    // Newest-first. With structPivots = 3 this is the OTC six-pivot rule:
+    // two consecutive higher highs AND higher lows make an uptrend.
+    enough = structPivots == 2 ? not na(h2) and not na(l2) : structPivots == 3 ? not na(h3) and not na(l3) : not na(h4) and not na(l4)
+    rising = structPivots == 2 ? (h1 > h2 and l1 > l2) : structPivots == 3 ? (h1 > h2 and h2 > h3 and l1 > l2 and l2 > l3) : (h1 > h2 and h2 > h3 and h3 > h4 and l1 > l2 and l2 > l3 and l3 > l4)
+    falling = structPivots == 2 ? (h1 < h2 and l1 < l2) : structPivots == 3 ? (h1 < h2 and h2 < h3 and l1 < l2 and l2 < l3) : (h1 < h2 and h2 < h3 and h3 < h4 and l1 < l2 and l2 < l3 and l3 < l4)
+    // 0 = not enough swings, 1 = rising sequence, -1 = falling, 2 = neither
+    structDir = not enough ? 0 : rising ? 1 : falling ? -1 : 2
 
     float idx = bar_index
     r = ta.correlation(close, idx, lenL)
@@ -83,7 +105,11 @@ f_calc(_waitForClose) =>
     er = path > 0 ? net / path : 0.0
 
     int rawState = 0
-    if structDir == 0 or slopeDir == 0
+    if otcMode
+        // As taught: structure alone decides and the residual is Sideways,
+        // so no Transition state exists in this mode.
+        rawState := structDir == 0 ? 0 : structDir == 1 ? 1 : structDir == -1 ? -1 : 2
+    else if structDir == 0 or slopeDir == 0
         rawState := 0
     else if structDir == 1 and slopeDir == 1
         rawState := 1
@@ -138,23 +164,46 @@ f_calc(_waitForClose) =>
     prevStruct := structDir
     prevSlope := slopeDir
 
-    [outState, outRaw, outER, outT, outStruct, outSlope]
+    // Four small ints packed into one float so each timeframe costs three
+    // series instead of six -- with eleven timeframes requested, that keeps
+    // the script clear of Pine's request.*() budget.
+    code = (outState + 2) + 10 * (outRaw + 2) + 100 * (outStruct + 2) + 1000 * (outSlope + 2)
+    [code, outER, outT]
+
+f_state(c)  => na(c) ? 0 : math.round(c % 10) - 2
+f_raw(c)    => na(c) ? 0 : math.round(math.floor(c / 10) % 10) - 2
+f_struct(c) => na(c) ? 0 : math.round(math.floor(c / 100) % 10) - 2
+f_slope(c)  => na(c) ? 0 : math.round(math.floor(c / 1000) % 10) - 2
 
 // Chart timeframe: computed directly, so it carries no extra higher-timeframe delay
-[chState, chRaw, chER, chT, chStruct, chSlope] = f_calc(false)
+[chCode, chER, chT] = f_calc(false)
 
-[s2, r2, e2, t2, sd2, pd2] = request.security(syminfo.tickerid, tf2, f_calc(waitForClose), lookahead=barmerge.lookahead_off)
-[s3, r3, e3, t3, sd3, pd3] = request.security(syminfo.tickerid, tf3, f_calc(waitForClose), lookahead=barmerge.lookahead_off)
-[s4, r4, e4, t4, sd4, pd4] = request.security(syminfo.tickerid, tf4, f_calc(waitForClose), lookahead=barmerge.lookahead_off)
-[s5, r5, e5, t5, sd5, pd5] = request.security(syminfo.tickerid, tf5, f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c1, e1, t1]    = request.security(syminfo.tickerid, "5",   f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c2, e2, t2]    = request.security(syminfo.tickerid, "15",  f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c3, e3, t3]    = request.security(syminfo.tickerid, "30",  f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c4, e4, t4]    = request.security(syminfo.tickerid, "60",  f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c5, e5, t5]    = request.security(syminfo.tickerid, "90",  f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c6, e6, t6]    = request.security(syminfo.tickerid, "240", f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c7, e7, t7]    = request.security(syminfo.tickerid, "360", f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c8, e8, t8]    = request.security(syminfo.tickerid, "D",   f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c9, e9, t9]    = request.security(syminfo.tickerid, "2D",  f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c10, e10, t10] = request.security(syminfo.tickerid, "W",   f_calc(waitForClose), lookahead=barmerge.lookahead_off)
+[c11, e11, t11] = request.security(syminfo.tickerid, "M",   f_calc(waitForClose), lookahead=barmerge.lookahead_off)
 
 // A lower timeframe pulled into a higher-timeframe chart returns only the last
 // value inside each chart bar, which is not a state this engine can stand behind.
 chartSec = timeframe.in_seconds(timeframe.period)
-ok2 = useTF2 and timeframe.in_seconds(tf2) >= chartSec
-ok3 = useTF3 and timeframe.in_seconds(tf3) >= chartSec
-ok4 = useTF4 and timeframe.in_seconds(tf4) >= chartSec
-ok5 = useTF5 and timeframe.in_seconds(tf5) >= chartSec
+ok1  = use1  and timeframe.in_seconds("5")   >= chartSec
+ok2  = use2  and timeframe.in_seconds("15")  >= chartSec
+ok3  = use3  and timeframe.in_seconds("30")  >= chartSec
+ok4  = use4  and timeframe.in_seconds("60")  >= chartSec
+ok5  = use5  and timeframe.in_seconds("90")  >= chartSec
+ok6  = use6  and timeframe.in_seconds("240") >= chartSec
+ok7  = use7  and timeframe.in_seconds("360") >= chartSec
+ok8  = use8  and timeframe.in_seconds("D")   >= chartSec
+ok9  = use9  and timeframe.in_seconds("2D")  >= chartSec
+ok10 = use10 and timeframe.in_seconds("W")   >= chartSec
+ok11 = use11 and timeframe.in_seconds("M")   >= chartSec
 
 // ---------- Display helpers ----------
 f_view(s) =>
@@ -167,64 +216,92 @@ f_stateColor(s) =>
     s == 1 ? cUp : s == -1 ? cDown : s == 2 ? cSide : s == 3 ? cTrans : cInsuf
 
 f_dirText(d) =>
-    d == 1 ? "Up" : d == -1 ? "Down" : d == 2 ? "No clear direction" : "Not enough data"
+    d == 1 ? "Up" : d == -1 ? "Down" : d == 2 ? "No clear sequence" : "Not enough data"
 
 f_bucket(er) =>
     er < 0.3 ? "Weak" : er < 0.6 ? "Moderate" : "Strong"
 
-f_tfLabel(_tf) =>
-    _tf == "1" ? "1m" : _tf == "3" ? "3m" : _tf == "5" ? "5m" : _tf == "15" ? "15m" : _tf == "30" ? "30m" : _tf == "60" ? "1H" : _tf == "120" ? "2H" : _tf == "240" ? "4H" : _tf == "D" ? "1D" : _tf == "W" ? "1W" : _tf == "M" ? "1M" : _tf
-
-f_tip(_state, _raw, _er, _t, _sd, _pd) =>
-    s = "State: " + f_stateText(_state)
-    s := s + "   (raw, before hysteresis: " + f_stateText(_raw) + ")"
-    s := s + "\nStructure: " + f_dirText(_sd)
-    s := s + "\nSlope: t-stat " + str.tostring(_t, "#.##") + "  -> " + f_dirText(_pd)
+f_tip(_code, _er, _t) =>
+    s = "State: " + f_stateText(f_view(f_state(_code)))
+    s := s + "   (raw, before hysteresis: " + f_stateText(f_raw(_code)) + ")"
+    s := s + "\nStructure: " + f_dirText(f_struct(_code)) + "  [" + str.tostring(structPivots) + " pivots per side]"
+    s := s + (otcMode ? "\nSlope: not used in OTC mode" : "\nSlope: t-stat " + str.tostring(_t, "#.##") + "  -> " + f_dirText(f_slope(_code)))
     s := s + "\nEfficiency: " + str.tostring(_er, "#.##") + "  (" + f_bucket(_er) + ")"
     s
 
 // ---------- Visuals ----------
+chState = f_state(chCode)
 chView = f_view(chState)
 bgcolor(showBg ? color.new(f_stateColor(chView), bgOpacity) : na)
 barcolor(showBars ? f_stateColor(chView) : na)
 
 tablePos = tablePosStr == "Top Right" ? position.top_right : tablePosStr == "Top Left" ? position.top_left : tablePosStr == "Bottom Right" ? position.bottom_right : position.bottom_left
+txtSize = tableSize == "Tiny" ? size.tiny : tableSize == "Normal" ? size.normal : size.small
 
-var table t = table.new(tablePos, 3, 7, border_width=1)
+var table t = table.new(tablePos, 3, 14, border_width=1)
 
-f_row(_t, _row, _label, _state, _raw, _er, _tstat, _sd, _pd) =>
-    v = f_view(_state)
-    tip = f_tip(v, _raw, _er, _tstat, _sd, _pd)
-    table.cell(_t, 0, _row, _label, text_color=chart.fg_color, text_size=size.small, tooltip=tip)
-    table.cell(_t, 1, _row, f_stateText(v), bgcolor=f_stateColor(v), text_color=color.white, text_size=size.small, tooltip=tip)
-    table.cell(_t, 2, _row, v == 0 ? "-" : f_bucket(_er), text_color=chart.fg_color, text_size=size.small, tooltip=tip)
+f_row(_row, _label, _code, _er, _t) =>
+    v = f_view(f_state(_code))
+    tip = f_tip(_code, _er, _t)
+    table.cell(t, 0, _row, _label, text_color=chart.fg_color, text_size=txtSize, tooltip=tip)
+    table.cell(t, 1, _row, f_stateText(v), bgcolor=f_stateColor(v), text_color=color.white, text_size=txtSize, tooltip=tip)
+    table.cell(t, 2, _row, v == 0 ? "-" : f_bucket(_er), text_color=chart.fg_color, text_size=txtSize, tooltip=tip)
 
 if showTable and barstate.islast
     hdr = color.new(chart.fg_color, 80)
-    table.cell(t, 0, 0, "TF", bgcolor=hdr, text_color=chart.fg_color, text_size=size.small)
-    table.cell(t, 1, 0, "State", bgcolor=hdr, text_color=chart.fg_color, text_size=size.small)
-    table.cell(t, 2, 0, "Strength", bgcolor=hdr, text_color=chart.fg_color, text_size=size.small)
+    table.cell(t, 0, 0, otcMode ? "TF (OTC)" : "TF", bgcolor=hdr, text_color=chart.fg_color, text_size=txtSize)
+    table.cell(t, 1, 0, "State", bgcolor=hdr, text_color=chart.fg_color, text_size=txtSize)
+    table.cell(t, 2, 0, "Strength", bgcolor=hdr, text_color=chart.fg_color, text_size=txtSize)
 
-    f_row(t, 1, f_tfLabel(timeframe.period), chState, chRaw, chER, chT, chStruct, chSlope)
+    int row = 0
+    if showChartTF
+        row += 1
+        f_row(row, "chart", chCode, chER, chT)
+    if ok1
+        row += 1
+        f_row(row, "5m", c1, e1, t1)
     if ok2
-        f_row(t, 2, f_tfLabel(tf2), s2, r2, e2, t2, sd2, pd2)
+        row += 1
+        f_row(row, "15m", c2, e2, t2)
     if ok3
-        f_row(t, 3, f_tfLabel(tf3), s3, r3, e3, t3, sd3, pd3)
+        row += 1
+        f_row(row, "30m", c3, e3, t3)
     if ok4
-        f_row(t, 4, f_tfLabel(tf4), s4, r4, e4, t4, sd4, pd4)
+        row += 1
+        f_row(row, "1H", c4, e4, t4)
     if ok5
-        f_row(t, 5, f_tfLabel(tf5), s5, r5, e5, t5, sd5, pd5)
+        row += 1
+        f_row(row, "90m", c5, e5, t5)
+    if ok6
+        row += 1
+        f_row(row, "4H", c6, e6, t6)
+    if ok7
+        row += 1
+        f_row(row, "6H", c7, e7, t7)
+    if ok8
+        row += 1
+        f_row(row, "1D", c8, e8, t8)
+    if ok9
+        row += 1
+        f_row(row, "2D", c9, e9, t9)
+    if ok10
+        row += 1
+        f_row(row, "1W", c10, e10, t10)
+    if ok11
+        row += 1
+        f_row(row, "1M", c11, e11, t11)
 
-    ups = (chState == 1 ? 1 : 0) + (ok2 and s2 == 1 ? 1 : 0) + (ok3 and s3 == 1 ? 1 : 0) + (ok4 and s4 == 1 ? 1 : 0) + (ok5 and s5 == 1 ? 1 : 0)
-    downs = (chState == -1 ? 1 : 0) + (ok2 and s2 == -1 ? 1 : 0) + (ok3 and s3 == -1 ? 1 : 0) + (ok4 and s4 == -1 ? 1 : 0) + (ok5 and s5 == -1 ? 1 : 0)
-    shown = 1 + (ok2 ? 1 : 0) + (ok3 ? 1 : 0) + (ok4 ? 1 : 0) + (ok5 ? 1 : 0)
+    ups = (ok1 and f_state(c1) == 1 ? 1 : 0) + (ok2 and f_state(c2) == 1 ? 1 : 0) + (ok3 and f_state(c3) == 1 ? 1 : 0) + (ok4 and f_state(c4) == 1 ? 1 : 0) + (ok5 and f_state(c5) == 1 ? 1 : 0) + (ok6 and f_state(c6) == 1 ? 1 : 0) + (ok7 and f_state(c7) == 1 ? 1 : 0) + (ok8 and f_state(c8) == 1 ? 1 : 0) + (ok9 and f_state(c9) == 1 ? 1 : 0) + (ok10 and f_state(c10) == 1 ? 1 : 0) + (ok11 and f_state(c11) == 1 ? 1 : 0)
+    downs = (ok1 and f_state(c1) == -1 ? 1 : 0) + (ok2 and f_state(c2) == -1 ? 1 : 0) + (ok3 and f_state(c3) == -1 ? 1 : 0) + (ok4 and f_state(c4) == -1 ? 1 : 0) + (ok5 and f_state(c5) == -1 ? 1 : 0) + (ok6 and f_state(c6) == -1 ? 1 : 0) + (ok7 and f_state(c7) == -1 ? 1 : 0) + (ok8 and f_state(c8) == -1 ? 1 : 0) + (ok9 and f_state(c9) == -1 ? 1 : 0) + (ok10 and f_state(c10) == -1 ? 1 : 0) + (ok11 and f_state(c11) == -1 ? 1 : 0)
+    shown = (ok1 ? 1 : 0) + (ok2 ? 1 : 0) + (ok3 ? 1 : 0) + (ok4 ? 1 : 0) + (ok5 ? 1 : 0) + (ok6 ? 1 : 0) + (ok7 ? 1 : 0) + (ok8 ? 1 : 0) + (ok9 ? 1 : 0) + (ok10 ? 1 : 0) + (ok11 ? 1 : 0)
     others = shown - ups - downs
-    alignTxt = str.tostring(ups) + " up / " + str.tostring(downs) + " down / " + str.tostring(others) + " other"
-    alignCol = ups == shown ? cUp : downs == shown ? cDown : color.new(chart.fg_color, 80)
+    row += 1
+    alignTxt = str.tostring(ups) + " up / " + str.tostring(downs) + " dn / " + str.tostring(others) + " flat"
+    alignCol = shown > 0 and ups == shown ? cUp : shown > 0 and downs == shown ? cDown : color.new(chart.fg_color, 80)
     alignTip = "How many of the displayed timeframes agree. All-up or all-down means the whole ladder is aligned; a split means higher and lower timeframes disagree."
-    table.cell(t, 0, 6, "Align", text_color=chart.fg_color, text_size=size.small, tooltip=alignTip)
-    table.cell(t, 1, 6, alignTxt, bgcolor=alignCol, text_color=ups == shown or downs == shown ? color.white : chart.fg_color, text_size=size.small, tooltip=alignTip)
-    table.cell(t, 2, 6, "", text_size=size.small)
+    table.cell(t, 0, row, "Align", text_color=chart.fg_color, text_size=txtSize, tooltip=alignTip)
+    table.cell(t, 1, row, alignTxt, bgcolor=alignCol, text_color=shown > 0 and (ups == shown or downs == shown) ? color.white : chart.fg_color, text_size=txtSize, tooltip=alignTip)
+    table.cell(t, 2, row, "", text_size=txtSize)
 
 // ---------- Alerts ----------
 alertcondition(ta.change(chState) != 0, title="Trend state changed (chart TF)", message="{{ticker}} trend state changed on {{interval}}")
